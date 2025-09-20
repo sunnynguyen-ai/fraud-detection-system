@@ -46,8 +46,8 @@ docker-compose logs -f model_trainer
 ```
 ┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
 │   Dashboard         │    │   API Service       │    │   Redis Cache       │
-│   (Streamlit)       │◄──►│   (FastAPI)        │◄──►│   (Session Store)   │
-│   Port: 8501        │    │   Port: 8000       │    │   Port: 6379        │
+│   (Streamlit)       │◄──►│   (FastAPI)         │◄──►│   (Session Store)   │
+│   Port: 8501        │    │   Port: 8000        │    │   Port: 6379        │
 └─────────────────────┘    └─────────────────────┘    └─────────────────────┘
          │                           │                           │
          └───────────────────────────┼───────────────────────────┘
