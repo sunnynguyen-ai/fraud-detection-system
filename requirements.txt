@@ -1,0 +1,34 @@
+# Core ML libraries
+pandas>=1.5.0
+numpy>=1.23.0
+scikit-learn>=1.2.0
+xgboost>=1.7.0
+lightgbm>=3.3.0
+
+# Data visualization
+matplotlib>=3.6.0
+seaborn>=0.12.0
+plotly>=5.15.0
+
+# Model interpretability
+shap>=0.42.0
+
+# API and web framework
+fastapi>=0.95.0
+uvicorn>=0.20.0
+streamlit>=1.25.0
+
+# Data processing
+imbalanced-learn>=0.10.0
+
+# Model tracking and deployment
+mlflow>=2.5.0
+joblib>=1.2.0
+
+# Optional: Streaming
+redis>=4.5.0
+
+# Development tools
+jupyter>=1.0.0
+pytest>=7.0.0
+black>=23.0.0
