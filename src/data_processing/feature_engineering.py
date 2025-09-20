@@ -1,6 +1,6 @@
 """
 Feature Engineering Pipeline for Fraud Detection
-
+ 
 This module provides comprehensive feature engineering capabilities including:
 - Time-based feature extraction
 - Statistical aggregations and rolling windows
