@@ -235,7 +235,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👨‍💻 **Author**
 
-**Sunny Nguyen** - *Machine Learning Engineer*
+**Sunny Nguyen**
 
 - 🔗 **GitHub**: [@sunnynguyen-ai](https://github.com/sunnynguyen-ai)
 - 💼 **LinkedIn**: [Connect with me](https://linkedin.com/in/sunnynguyen-ai)
