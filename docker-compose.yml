@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: fraud_detection_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fraud_detection_network
+
+  # Fraud Detection API Service
+  fraud_api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: api
+    container_name: fraud_detection_api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - API_ENV=production
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./models:/app/models:ro  # Read-only model access
+      - api_logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - fraud_detection_network
+
+  # Monitoring Dashboard Service
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: dashboard
+    container_name: fraud_detection_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONPATH=/app
+      - API_BASE_URL=http://fraud_api:8000
+    volumes:
+      - ./models:/app/models:ro
+    depends_on:
+      fraud_api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - fraud_detection_network
+
+  # Training/Development Environment (optional)
+  jupyter:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: training
+    container_name: fraud_detection_jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      - PYTHONPATH=/app
+      - JUPYTER_ENABLE_LAB=yes
+    volumes:
+      - .:/app
+      - jupyter_data:/home/devuser/.jupyter
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - fraud_detection_network
+    profiles:
+      - development  # Only start with --profile development
+
+  # Model Training Service (for retraining)
+  model_trainer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: training
+    container_name: fraud_detection_trainer
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - training_logs:/app/logs
+    command: python src/models/train.py  # You'll create this script
+    depends_on:
+      - redis
+    networks:
+      - fraud_detection_network
+    profiles:
+      - training  # Only start with --profile training
+
+# Named volumes for persistent data
+volumes:
+  redis_data:
+    driver: local
+  api_logs:
+    driver: local
+  jupyter_data:
+    driver: local
+  training_logs:
+    driver: local
+
+# Custom network for service communication
+networks:
+  fraud_detection_network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
