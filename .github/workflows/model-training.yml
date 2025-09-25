@@ -1,0 +1,85 @@
+name: Model Retraining Pipeline
+
+on:
+  schedule:
+    # Run weekly on Sundays at 3 AM UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      dataset_size:
+        description: 'Number of samples for training'
+        required: false
+        default: '100000'
+
+jobs:
+  retrain-models:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mlflow
+      
+      - name: Generate training data
+        run: |
+          python -c "
+          from src.data_processing.generate_data import create_fraud_dataset
+          df = create_fraud_dataset(n_samples=${{ github.event.inputs.dataset_size || 100000 }})
+          df.to_csv('data/raw/training_data.csv', index=False)
+          print(f'Generated {len(df)} samples for training')
+          "
+      
+      - name: Train models
+        run: |
+          python -c "
+          import mlflow
+          from src.data_processing.generate_data import create_fraud_dataset
+          from src.data_processing.feature_engineering import AdvancedFeatureEngineering
+          from src.models.fraud_detector import EnsembleFraudDetector
+          
+          # MLflow tracking
+          mlflow.set_experiment('fraud-detection-retraining')
+          
+          with mlflow.start_run():
+              # Generate data
+              df = create_fraud_dataset(n_samples=${{ github.event.inputs.dataset_size || 100000 }})
+              
+              # Feature engineering
+              fe = AdvancedFeatureEngineering(target_column='Class')
+              df_processed = fe.fit_transform(df)
+              
+              # Train ensemble
+              X = df_processed.drop('Class', axis=1)
+              y = df_processed['Class']
+              ensemble = EnsembleFraudDetector()
+              ensemble.train(X, y, test_size=0.2, balance_data=True)
+              
+              # Log metrics
+              for metric, value in ensemble.ensemble_metrics.items():
+                  mlflow.log_metric(metric, value)
+              
+              # Save models
+              import joblib
+              import os
+              os.makedirs('models', exist_ok=True)
+              joblib.dump(fe, 'models/feature_engineering_pipeline.pkl')
+              ensemble.save_ensemble('models/fraud_detection_ensemble.pkl')
+              
+              print(f'Training complete! F1 Score: {ensemble.ensemble_metrics[\"f1_score\"]:.4f}')
+          "
+      
+      - name: Upload trained models
+        uses: actions/upload-artifact@v3
+        with:
+          name: trained-models-${{ github.run_number }}
+          path: models/
+          retention-days: 30
