@@ -13,7 +13,6 @@ Production-ready FastAPI application for real-time fraud detection with:
 Author: Sunny Nguyen
 """
 
-import json
 import logging
 import os
 import time
@@ -23,7 +22,6 @@ from typing import Any, Dict, List, Optional
 
 # ML and data processing
 import joblib
-import numpy as np
 import pandas as pd
 
 # FastAPI imports
