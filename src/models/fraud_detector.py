@@ -33,17 +33,11 @@ from imblearn.under_sampling import RandomUnderSampler
 # ML Libraries
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    classification_report,
-    confusion_matrix,
-    f1_score,
-    precision_recall_curve,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-    roc_curve,
-)
-from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_split
+from sklearn.metrics import (classification_report, confusion_matrix, f1_score,
+                             precision_recall_curve, precision_score,
+                             recall_score, roc_auc_score, roc_curve)
+from sklearn.model_selection import (GridSearchCV, cross_val_score,
+                                     train_test_split)
 from sklearn.utils.class_weight import compute_class_weight
 
 warnings.filterwarnings("ignore")
@@ -111,7 +105,9 @@ class BaseDetector:
 
         return X_train, X_test, y_train, y_test
 
-    def evaluate_model(self, X_test: pd.DataFrame, y_test: pd.Series) -> Dict[str, float]:
+    def evaluate_model(
+        self, X_test: pd.DataFrame, y_test: pd.Series
+    ) -> Dict[str, float]:
         """
         Comprehensive model evaluation
 
@@ -678,7 +674,9 @@ class EnsembleFraudDetector:
                 "error": f"Could not generate SHAP explanation: {e}",
             }
 
-    def evaluate_ensemble(self, X_test: pd.DataFrame, y_test: pd.Series) -> Dict[str, float]:
+    def evaluate_ensemble(
+        self, X_test: pd.DataFrame, y_test: pd.Series
+    ) -> Dict[str, float]:
         """
         Evaluate ensemble performance.
 

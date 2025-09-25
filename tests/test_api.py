@@ -1,4 +1,3 @@
-
 """
 Unit tests for Fraud Detection API
 """
