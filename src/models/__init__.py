@@ -4,17 +4,13 @@ Machine Learning Models Module
 Contains fraud detection model classes and ensemble implementation.
 """
 
-from .fraud_detector import (
-    RandomForestDetector,
-    XGBoostDetector, 
-    LogisticRegressionDetector,
-    EnsembleFraudDetector
-)
+from .fraud_detector import (EnsembleFraudDetector, LogisticRegressionDetector,
+                             RandomForestDetector, XGBoostDetector)
 
 __all__ = [
-    'RandomForestDetector',
-    'XGBoostDetector',
-    'LogisticRegressionDetector', 
-    'EnsembleFraudDetector'
+    "RandomForestDetector",
+    "XGBoostDetector",
+    "LogisticRegressionDetector",
+    "EnsembleFraudDetector",
 ]
-__version__ = '1.0.0'
+__version__ = "1.0.0"
