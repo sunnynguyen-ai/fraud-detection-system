@@ -13,9 +13,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data_processing.feature_engineering import AdvancedFeatureEngineering
 from src.data_processing.generate_data import create_fraud_dataset
-from src.models.fraud_detector import (EnsembleFraudDetector,
-                                       LogisticRegressionDetector,
-                                       RandomForestDetector, XGBoostDetector)
+from src.models.fraud_detector import (
+    EnsembleFraudDetector,
+    LogisticRegressionDetector,
+    RandomForestDetector,
+    XGBoostDetector,
+)
 
 
 class TestModels:

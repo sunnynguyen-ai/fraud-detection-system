@@ -13,31 +13,42 @@ Author: Sunny Nguyen
 
 import json
 import os
+
 # Suppress warnings
 import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 import joblib
+
 # Visualization
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+
 # Explainability
 import shap
+
 # Advanced ML
 import xgboost as xgb
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
+
 # ML Libraries
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (classification_report, confusion_matrix, f1_score,
-                             precision_recall_curve, precision_score,
-                             recall_score, roc_auc_score, roc_curve)
-from sklearn.model_selection import (GridSearchCV, cross_val_score,
-                                     train_test_split)
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    roc_curve,
+)
+from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 
 warnings.filterwarnings("ignore")
