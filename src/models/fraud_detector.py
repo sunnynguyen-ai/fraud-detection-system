@@ -180,7 +180,9 @@ class BaseDetector:
         # 2. ROC Curve
         fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
         axes[0, 1].plot(
-            fpr, tpr, label=f"ROC (AUC = {roc_auc_score(y_test, y_pred_proba):.3f})"
+            fpr,
+            tpr,
+            label=f"ROC (AUC = {roc_auc_score(y_test, y_pred_proba):.3f})",
         )
         axes[0, 1].plot([0, 1], [0, 1], "k--")
         axes[0, 1].set_xlabel("False Positive Rate")
@@ -682,7 +684,9 @@ class EnsembleFraudDetector:
                 )
 
             # Sort by absolute SHAP value
-            feature_contributions.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
+            feature_contributions.sort(
+                key=lambda x: abs(x["shap_value"]), reverse=True
+            )
 
             return {
                 "prediction_probability": float(prediction),
