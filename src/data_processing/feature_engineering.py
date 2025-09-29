@@ -1,6 +1,4 @@
-"""
-Feature Engineering Pipeline for Fraud Detection
-
+""" Feature Engineering Pipeline for Fraud Detection
 This module provides comprehensive feature engineering capabilities including:
 - Time-based feature extraction
 - Statistical aggregations and rolling windows
@@ -12,7 +10,6 @@ Author: Sunny Nguyen
 """
 
 import warnings
-
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -64,9 +61,9 @@ class AdvancedFeatureEngineering:
             df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
 
             # Business hours (9 AM to 5 PM)
-            df["is_business_hours"] = ((df["hour"] >= 9) & (df["hour"] <= 17)).astype(
-                int
-            )
+            df["is_business_hours"] = (
+                (df["hour"] >= 9) & (df["hour"] <= 17)
+            ).astype(int)
 
             # Late night transactions (11 PM to 6 AM)
             df["is_late_night"] = ((df["hour"] >= 23) | (df["hour"] <= 6)).astype(int)
@@ -90,7 +87,6 @@ class AdvancedFeatureEngineering:
             pd.DataFrame: Dataframe with additional amount features
         """
         df = df.copy()
-
         if "Amount" in df.columns:
             # Log transformation for skewed amounts
             df["amount_log"] = np.log1p(df["Amount"])
@@ -128,10 +124,7 @@ class AdvancedFeatureEngineering:
         df = df.copy()
 
         # Get V columns
-        v_columns = [
-            col for col in df.columns if col.startswith("V") and col[1:].isdigit()
-        ]
-
+        v_columns = [col for col in df.columns if col.startswith("V") and col[1:].isdigit()]
         if v_columns:
             v_data = df[v_columns]
 
@@ -156,9 +149,7 @@ class AdvancedFeatureEngineering:
 
             # Correlation with amount if available
             if "Amount" in df.columns:
-                for col in v_columns[
-                    :5
-                ]:  # First 5 V columns for computational efficiency
+                for col in v_columns[:5]:  # First 5 V columns for computational efficiency
                     df[f"{col}_amount_ratio"] = df[col] / (df["Amount"] + 1e-8)
 
         return df
@@ -182,9 +173,7 @@ class AdvancedFeatureEngineering:
             df["business_hours_amount"] = df["is_business_hours"] * df["amount_log"]
 
         # V feature interactions (select most important ones)
-        v_columns = [
-            col for col in df.columns if col.startswith("V") and col[1:].isdigit()
-        ]
+        v_columns = [col for col in df.columns if col.startswith("V") and col[1:].isdigit()]
         if len(v_columns) >= 4:
             # Create interactions between highly correlated V features
             df["v1_v2_interaction"] = df["V1"] * df["V2"]
@@ -218,8 +207,8 @@ class AdvancedFeatureEngineering:
                     median_value = df[column].median()
                     df[column] = df[column].fillna(median_value)
 
-                    # Create missing indicator
-                    df[f"{column}_was_missing"] = df[column].isnull().astype(int)
+                # Create missing indicator
+                df[f"{column}_was_missing"] = df[column].isnull().astype(int)
 
         return df
 
@@ -235,7 +224,6 @@ class AdvancedFeatureEngineering:
             pd.DataFrame: Dataframe with encoded categorical features
         """
         df = df.copy()
-
         categorical_columns = df.select_dtypes(include=["object", "category"]).columns
 
         for column in categorical_columns:
@@ -252,12 +240,10 @@ class AdvancedFeatureEngineering:
                         known_categories = set(self.encoders[column].classes_)
                         df[column] = df[column].astype(str)
                         unknown_mask = ~df[column].isin(known_categories)
-
                         if unknown_mask.any():
                             # Replace unknown categories with most frequent
                             most_frequent = self.encoders[column].classes_[0]
                             df.loc[unknown_mask, column] = most_frequent
-
                         df[column] = self.encoders[column].transform(df[column])
 
         return df
@@ -285,7 +271,8 @@ class AdvancedFeatureEngineering:
             # Choose scaler
             if method == "standard":
                 scaler = StandardScaler()
-            else:  # robust (default)
+            else:
+                # robust (default)
                 scaler = RobustScaler()
 
             # Fit and transform
@@ -360,38 +347,37 @@ class AdvancedFeatureEngineering:
         # Store original target
         target = df[self.target_column] if self.target_column in df.columns else None
 
-        print("🔧 Starting feature engineering pipeline...")
+        print(" Starting feature engineering pipeline...")
 
         # Apply transformations step by step
-        print("  ⏰ Creating time features...")
+        print(" ⏰ Creating time features...")
         df = self.create_time_features(df)
 
-        print("  💰 Creating amount features...")
+        print(" Creating amount features...")
         df = self.create_amount_features(df)
 
-        print("  📊 Creating statistical features...")
+        print(" Creating statistical features...")
         df = self.create_statistical_features(df)
 
-        print("  🔗 Creating interaction features...")
+        print(" Creating interaction features...")
         df = self.create_interaction_features(df)
 
-        print("  🔧 Handling missing values...")
+        print(" Handling missing values...")
         df = self.handle_missing_values(df)
 
-        print("  🏷️ Encoding categorical features...")
+        print(" ️ Encoding categorical features...")
         df = self.encode_categorical_features(df, fit=True)
 
-        print("  📏 Scaling features...")
+        print(" Scaling features...")
         df = self.scale_features(df, fit=True)
 
         if target is not None:
-            print("  🎯 Selecting best features...")
+            print(" Selecting best features...")
             df = self.select_features(df, target, k=50)
 
         self.is_fitted = True
         print("✅ Feature engineering pipeline completed!")
-        print(f"📈 Final dataset shape: {df.shape}")
-
+        print(f" Final dataset shape: {df.shape}")
         return df
 
     def transform(self, df):
@@ -446,24 +432,21 @@ class AdvancedFeatureEngineering:
             "scalers_fitted": list(self.scalers.keys()),
             "is_fitted": self.is_fitted,
         }
-
         return summary
 
 
 # Example usage and testing function
 def test_feature_engineering():
     """Test the feature engineering pipeline with sample data"""
-
     # Import data generation function
     import os
     import sys
 
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
     from data_processing.generate_data import create_fraud_dataset
 
     # Create sample data
-    print("🔄 Creating sample dataset...")
+    print(" Creating sample dataset...")
     df = create_fraud_dataset(n_samples=10000)
 
     # Initialize feature engineering
@@ -473,18 +456,19 @@ def test_feature_engineering():
     df_transformed = fe.fit_transform(df)
 
     # Print results
-    print(f"\n📊 Transformation Results:")
+    print("\n Transformation Results:")  # (F541 fixed: no placeholder)
     print(f"Original shape: {df.shape}")
     print(f"Transformed shape: {df_transformed.shape}")
     print(f"Features created: {df_transformed.shape[1] - df.shape[1]}")
 
     # Print feature summary
     summary = fe.get_feature_importance_summary()
-    print(f"\n🎯 Selected Features ({len(summary['selected_features'])}):")
+    print(f"\n Selected Features ({len(summary['selected_features'])}):")
     for i, feature in enumerate(summary["selected_features"][:10]):
-        print(f"  {i+1}. {feature}")
+        print(f" {i + 1}. {feature}")  # (E226 fixed with spaces around +)
+
     if len(summary["selected_features"]) > 10:
-        print(f"  ... and {len(summary['selected_features']) - 10} more")
+        print(f" ... and {len(summary['selected_features']) - 10} more")
 
     return df_transformed, fe
 
