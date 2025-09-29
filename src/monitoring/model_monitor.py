@@ -394,7 +394,9 @@ class ModelMonitor:
         return {
             "current_avg_probability": recent[-1]["mean"],
             "trend": (
-                "increasing" if recent[-1]["mean"] > recent[0]["mean"] else "decreasing"
+                "increasing"
+                if recent[-1]["mean"] > recent[0]["mean"]
+                else "decreasing"
             ),
             "high_risk_trend": [p["high_risk_ratio"] for p in recent],
             "distribution_stability": np.std([p["std"] for p in recent]),
@@ -428,7 +430,10 @@ class ModelMonitor:
         recommendations = []
 
         # Based on performance
-        if self.performance_history and self.performance_history[-1]["f1_score"] < 0.85:
+        if (
+            self.performance_history
+            and self.performance_history[-1]["f1_score"] < 0.85
+        ):
             recommendations.append("Consider retraining the model with recent data")
 
         # Based on drift
@@ -461,7 +466,8 @@ class ModelMonitor:
         # 1. Performance over time
         if self.performance_history:
             timestamps = [
-                datetime.fromisoformat(m["timestamp"]) for m in self.performance_history
+                datetime.fromisoformat(m["timestamp"])
+                for m in self.performance_history
             ]
             f1_scores = [m["f1_score"] for m in self.performance_history]
             axes[0, 0].plot(timestamps, f1_scores, marker="o")
@@ -484,7 +490,8 @@ class ModelMonitor:
         # 3. Prediction distribution
         if self.prediction_history:
             timestamps = [
-                datetime.fromisoformat(p["timestamp"]) for p in self.prediction_history
+                datetime.fromisoformat(p["timestamp"])
+                for p in self.prediction_history
             ]
             means = [p["mean"] for p in self.prediction_history]
             axes[0, 2].plot(timestamps, means, label="Mean", color="blue")
@@ -504,7 +511,9 @@ class ModelMonitor:
         if self.performance_history:
             precision = [m["precision"] for m in self.performance_history]
             recall = [m["recall"] for m in self.performance_history]
-            axes[1, 0].scatter(recall, precision, c=range(len(recall)), cmap="viridis")
+            axes[1, 0].scatter(
+                recall, precision, c=range(len(recall)), cmap="viridis"
+            )
             axes[1, 0].set_title("Precision-Recall Trade-off")
             axes[1, 0].set_xlabel("Recall")
             axes[1, 0].set_ylabel("Precision")
@@ -562,4 +571,8 @@ if __name__ == "__main__":
     # Simulate monitoring
     for i in range(5):
         # Generate new data (simulating production data)
-        current_data = create_fraud_
+        current_data = create_fraud_dataset(n_samples=1000)
+
+        # Detect drift
+        drift_reports = monitor.detect_data_drift(current_data)
+        print(f"Iteration {i+1}: {len([d for d in drift_reports if d.drift_detected])} features with drift")
