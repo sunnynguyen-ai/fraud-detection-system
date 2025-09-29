@@ -15,14 +15,11 @@ from typing import Dict, Optional
 import redis
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_429_TOO_MANY_REQUESTS
 
 # Import original API components
 from fraud_api import (
-    BatchPredictionResponse,
-    BatchTransactionRequest,
     FraudPredictionResponse,
     HealthCheckResponse,
     TransactionRequest,
