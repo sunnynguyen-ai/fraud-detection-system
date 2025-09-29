@@ -11,13 +11,12 @@ This module provides production-ready machine learning models for fraud detectio
 Author: Sunny Nguyen
 """
 
-import json
 import os
 
 # Suppress warnings
 import warnings
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 import joblib
 
@@ -33,13 +32,11 @@ import shap
 # Advanced ML
 import xgboost as xgb
 from imblearn.over_sampling import SMOTE
-from imblearn.under_sampling import RandomUnderSampler
 
 # ML Libraries
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
-    classification_report,
     confusion_matrix,
     f1_score,
     precision_recall_curve,
@@ -49,7 +46,6 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_split
-from sklearn.utils.class_weight import compute_class_weight
 
 warnings.filterwarnings("ignore")
 

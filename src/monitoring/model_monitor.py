@@ -10,17 +10,16 @@ Features:
 - Prediction distribution analysis
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
 import json
 import warnings
-from dataclasses import dataclass, asdict
-from scipy import stats
-from scipy.stats import ks_2samp, chi2_contingency
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Dict, List, Optional
+
 import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
+import pandas as pd
+from scipy.stats import ks_2samp
 
 warnings.filterwarnings("ignore")
 
@@ -209,11 +208,11 @@ class ModelMonitor:
         """
         from sklearn.metrics import (
             accuracy_score,
+            f1_score,
+            log_loss,
             precision_score,
             recall_score,
-            f1_score,
             roc_auc_score,
-            log_loss,
         )
 
         timestamp = timestamp or datetime.now()

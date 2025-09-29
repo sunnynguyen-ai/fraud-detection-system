@@ -2,7 +2,6 @@
 Unit tests for Fraud Detection API
 """
 
-import json
 import os
 import sys
 

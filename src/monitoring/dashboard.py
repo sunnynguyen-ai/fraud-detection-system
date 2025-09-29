@@ -12,14 +12,12 @@ Interactive Streamlit dashboard for monitoring fraud detection system:
 Author: Sunny Nguyen
 """
 
-import json
 import os
 import random
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -128,7 +126,7 @@ def get_api_metrics():
             return response.json(), True
         else:
             return {}, False
-    except Exception as e:
+    except Exception:
         return {}, False
 
 

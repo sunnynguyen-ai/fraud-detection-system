@@ -6,7 +6,6 @@ import os
 import sys
 
 import numpy as np
-import pandas as pd
 import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
