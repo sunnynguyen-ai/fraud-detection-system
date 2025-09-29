@@ -36,7 +36,8 @@ warnings.filterwarnings("ignore")
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -352,7 +353,9 @@ async def predict_fraud(
 
         try:
             if hasattr(ensemble_model, "explain_prediction"):
-                explanation_result = ensemble_model.explain_prediction(df_processed, 0)
+                explanation_result = ensemble_model.explain_prediction(
+                    df_processed, 0
+                )
                 if "top_features" in explanation_result:
                     top_risk_factors = explanation_result["top_features"][:3]
                 explanation = {
@@ -401,7 +404,8 @@ async def predict_fraud(
 
 @app.post("/predict/batch", response_model=BatchPredictionResponse)
 async def predict_fraud_batch(
-    batch_request: BatchTransactionRequest, _: None = Depends(check_model_dependency)
+    batch_request: BatchTransactionRequest,
+    _: None = Depends(check_model_dependency),
 ):
     """
     Predict fraud probability for multiple transactions
@@ -434,7 +438,9 @@ async def predict_fraud_batch(
                     fraud_probability=round(fraud_probability, 4),
                     is_fraud=is_fraud,
                     risk_level=risk_level,
-                    confidence_score=round(get_confidence_score(fraud_probability), 4),
+                    confidence_score=round(
+                        get_confidence_score(fraud_probability), 4
+                    ),
                     processing_time_ms=0,  # Will be updated with batch time
                     model_version="ensemble-v1.0",
                     timestamp=datetime.now().isoformat(),
@@ -457,7 +463,8 @@ async def predict_fraud_batch(
         }
 
         logger.info(
-            f"Batch prediction - {len(predictions)} transactions, {fraud_count} fraud detected"
+            f"Batch prediction - {len(predictions)} transactions, "
+            f"{fraud_count} fraud detected"
         )
 
         return BatchPredictionResponse(
@@ -468,7 +475,9 @@ async def predict_fraud_batch(
 
     except Exception as e:
         logger.error(f"Error during batch prediction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Batch prediction error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Batch prediction error: {str(e)}"
+        )
 
 
 @app.get("/metrics")
@@ -503,7 +512,9 @@ async def reload_models():
         else:
             raise HTTPException(status_code=500, detail="Failed to reload models")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reloading models: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error reloading models: {str(e)}"
+        )
 
 
 # Error handlers
