@@ -123,12 +123,13 @@ def generate_and_save_data():
     fraud_data = create_fraud_dataset(n_samples=100000)
 
     # Print dataset statistics
-    print(f"\nDataset Statistics:")
+    print("\nDataset Statistics:")
     print(f"Total transactions: {len(fraud_data):,}")
     print(f"Fraud transactions: {fraud_data['Class'].sum():,}")
     print(f"Normal transactions: {(fraud_data['Class'] == 0).sum():,}")
     print(
-        f"Fraud rate: {fraud_data['Class'].mean():.4f} ({fraud_data['Class'].mean()*100:.2f}%)"
+        f"Fraud rate: {fraud_data['Class'].mean():.4f} "
+        f"({fraud_data['Class'].mean() * 100:.2f}%)"
     )
     print(f"Average transaction amount: ${fraud_data['Amount'].mean():.2f}")
     print(f"Dataset shape: {fraud_data.shape}")
@@ -137,7 +138,7 @@ def generate_and_save_data():
     save_dataset(fraud_data)
 
     # Display first few rows
-    print(f"\nFirst 5 rows:")
+    print("\nFirst 5 rows:")
     print(fraud_data.head())
 
     return fraud_data
