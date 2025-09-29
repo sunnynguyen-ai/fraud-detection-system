@@ -1,187 +1,149 @@
-#!/usr/bin/env python3
-"""
-Complete script to fix all linting issues reported by flake8
-Run this from the project root directory: /workspaces/fraud-detection-system/
-"""
-
 import os
-import re
-from pathlib import Path
 
-def fix_file(filepath, fixes):
-    """
-    Apply fixes to a specific file
-    
-    Args:
-        filepath: Path to the file
-        fixes: List of tuples (line_number, fix_type, fix_function)
-    """
-    if not os.path.exists(filepath):
-        print(f"❌ File not found: {filepath}")
-        return False
-    
-    with open(filepath, 'r') as f:
-        lines = f.readlines()
-    
-    modified = False
-    for line_num, fix_type, fix_func in fixes:
-        if line_num <= len(lines):
-            old_line = lines[line_num - 1]
-            new_line = fix_func(old_line)
-            
-            if old_line != new_line:
-                lines[line_num - 1] = new_line
-                print(f"  Line {line_num} ({fix_type}):")
-                print(f"    Old: {old_line.strip()[:80]}...")
-                print(f"    New: {new_line.strip()[:80]}...")
-                modified = True
-    
-    if modified:
-        with open(filepath, 'w') as f:
-            f.writelines(lines)
-        print(f"✅ Fixed {filepath}\n")
-    else:
-        print(f"ℹ️  No changes needed for {filepath}\n")
-    
-    return modified
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_classification
 
-def fix_whitespace_around_operator(line):
-    """Fix E226: missing whitespace around arithmetic operator"""
-    # Fix common operators without spaces
-    patterns = [
-        (r'(\w)\*(\w)', r'\1 * \2'),  # Fix multiplication
-        (r'(\w)/(\w)', r'\1 / \2'),    # Fix division
-        (r'(\w)\+(\w)', r'\1 + \2'),   # Fix addition
-        (r'(\w)-(\w)', r'\1 - \2'),    # Fix subtraction
-        (r'(\))\*(\d)', r'\1 * \2'),   # Fix ) * number
-        (r'(\d)\*(\()', r'\1 * \2'),   # Fix number * (
+
+def create_fraud_dataset(n_samples=100000):
+    """
+    Create a realistic synthetic fraud detection dataset
+
+    Returns:
+        pd.DataFrame: Synthetic transaction data with fraud labels
+    """
+    np.random.seed(42)
+
+    # Generate base features using make_classification
+    X, y = make_classification(
+        n_samples=n_samples,
+        n_features=20,
+        n_informative=15,
+        n_redundant=3,
+        n_clusters_per_class=1,
+        weights=[0.99, 0.01],  # 1% fraud rate (realistic)
+        random_state=42,
+    )
+
+    # Create realistic feature names
+    feature_names = [
+        "V1",
+        "V2",
+        "V3",
+        "V4",
+        "V5",
+        "V6",
+        "V7",
+        "V8",
+        "V9",
+        "V10",
+        "V11",
+        "V12",
+        "V13",
+        "V14",
+        "V15",
+        "V16",
+        "V17",
+        "V18",
+        "V19",
+        "V20",
     ]
-    
-    new_line = line
-    for pattern, replacement in patterns:
-        new_line = re.sub(pattern, replacement, new_line)
-    return new_line
 
-def fix_long_line(line, max_length=100):
-    """Fix E501: line too long"""
-    if len(line.rstrip()) <= max_length:
-        return line
-    
-    # For different types of long lines, apply different strategies
-    
-    # If it's a string, try to break it
-    if '"""' in line or "'''" in line:
-        return line  # Don't break docstrings
-    
-    # If it's a function call with many parameters
-    if '(' in line and ')' in line:
-        # Find good breaking points (after commas)
-        if ',' in line:
-            parts = line.split(',')
-            if len(parts) > 1:
-                # Try to break after a comma near the middle
-                indent = len(line) - len(line.lstrip())
-                new_line = parts[0] + ',\n'
-                for i, part in enumerate(parts[1:], 1):
-                    if i == len(parts) - 1:
-                        new_line += ' ' * (indent + 4) + part
-                    else:
-                        new_line += ' ' * (indent + 4) + part + ',\n'
-                return new_line
-    
-    # If it's a long string literal
-    if '"' in line or "'" in line:
-        # Check if we can use parentheses to break the string
-        match = re.search(r'(.*?)(["\']{1,3})(.*?)\2(.*)', line)
-        if match and len(match.group(3)) > 50:
-            # Break long strings using implicit concatenation
-            indent = len(line) - len(line.lstrip())
-            before = match.group(1)
-            quote = match.group(2)
-            content = match.group(3)
-            after = match.group(4)
-            
-            # Break content into chunks
-            chunk_size = 70
-            chunks = [content[i:i+chunk_size] for i in range(0, len(content), chunk_size)]
-            
-            if len(chunks) > 1:
-                new_line = before + '(\n'
-                for chunk in chunks:
-                    new_line += ' ' * (indent + 4) + quote + chunk + quote + '\n'
-                new_line = new_line.rstrip() + '\n' + ' ' * indent + ')' + after
-                return new_line
-    
-    # Default: try to break at logical operators or comparison operators
-    for op in [' and ', ' or ', ' if ', ' else ']:
-        if op in line:
-            parts = line.split(op, 1)
-            if len(parts) == 2:
-                indent = len(line) - len(line.lstrip())
-                return parts[0] + op + '\n' + ' ' * (indent + 4) + parts[1].lstrip()
-    
-    return line  # Return unchanged if no good breaking point found
+    # Create DataFrame
+    df = pd.DataFrame(X, columns=feature_names)
+    df["Class"] = y  # 0 = Normal, 1 = Fraud
 
-def remove_unnecessary_fstring(line):
-    """Fix F541: f-string is missing placeholders"""
-    # Look for f-strings without any placeholders
-    if 'f"' in line or "f'" in line:
-        # Check if there are no curly braces (placeholders)
-        if '{' not in line:
-            # Remove the f prefix
-            line = re.sub(r'\bf"', '"', line)
-            line = re.sub(r"\bf'", "'", line)
-    return line
+    # Add realistic transaction amounts
+    # Normal transactions: mostly small amounts
+    # Fraud transactions: wider range, some very large
+    normal_mask = df["Class"] == 0
+    fraud_mask = df["Class"] == 1
 
-def main():
-    """Main function to fix all linting issues"""
-    print("🔧 Fixing all linting issues in fraud-detection-system\n")
-    print("="*60)
-    
-    # Define all fixes needed based on flake8 output
-    fixes_map = {
-        "src/data_processing/generate_data.py": [
-            (131, "E226", fix_whitespace_around_operator),
-        ],
-        "src/models/fraud_detector.py": [
-            (109, "E501", fix_long_line),
-            (592, "F541", remove_unnecessary_fstring),
-        ],
-        "src/monitoring/dashboard.py": [
-            (234, "E501", fix_long_line),
-            (369, "E226", fix_whitespace_around_operator),
-            (379, "E226", fix_whitespace_around_operator),
-        ],
-        "src/monitoring/model_monitor.py": [
-            (569, "E226", fix_whitespace_around_operator),
-            (569, "E501", fix_long_line),  # Same line has two issues
-        ],
-    }
-    
-    # Apply fixes to each file
-    total_fixed = 0
-    for filepath, fixes in fixes_map.items():
-        print(f"\n📄 Processing: {filepath}")
-        print("-" * 40)
-        if fix_file(filepath, fixes):
-            total_fixed += 1
-    
-    print("="*60)
-    print(f"\n✨ Summary: Fixed {total_fixed} out of {len(fixes_map)} files")
-    
-    # Provide next steps
-    print("\n📋 Next Steps:")
-    print("1. Run the linting commands again to verify all issues are fixed:")
-    print("   isort src tests")
-    print("   black src tests")
-    print("   flake8 src tests --max-line-length=100 --ignore=E203,W503")
-    print("\n2. If any issues remain (especially long lines), they may need manual intervention")
-    print("   as some lines might be difficult to break automatically while maintaining readability.")
-    print("\n3. Review the changes with:")
-    print("   git diff")
-    print("\n4. If satisfied, commit the changes:")
-    print("   git add -A")
-    print('   git commit -m "Fix linting issues (E226, E501, F541)"')
+    # Normal transaction amounts (log-normal distribution)
+    df.loc[normal_mask, "Amount"] = np.random.lognormal(
+        mean=3, sigma=1, size=normal_mask.sum()
+    )
+
+    # Fraud transaction amounts (more varied, some very large)
+    fraud_amounts = []
+    n_fraud = fraud_mask.sum()
+
+    # 70% small fraud amounts
+    fraud_amounts.extend(
+        np.random.lognormal(mean=2.5, sigma=0.8, size=int(0.7 * n_fraud))
+    )
+    # 20% medium fraud amounts
+    fraud_amounts.extend(
+        np.random.lognormal(mean=4, sigma=0.5, size=int(0.2 * n_fraud))
+    )
+    # 10% large fraud amounts
+    fraud_amounts.extend(
+        np.random.lognormal(mean=6, sigma=0.3, size=n_fraud - len(fraud_amounts))
+    )
+
+    df.loc[fraud_mask, "Amount"] = fraud_amounts[:n_fraud]
+
+    # Round amounts to 2 decimal places
+    df["Amount"] = np.round(df["Amount"], 2)
+
+    # Add time feature (seconds from some reference point)
+    df["Time"] = np.random.randint(0, 172800, size=n_samples)  # 2 days worth of seconds
+
+    # Sort by time to make it more realistic
+    df = df.sort_values("Time").reset_index(drop=True)
+
+    # Reorder columns to match credit card fraud dataset format
+    columns_order = ["Time"] + feature_names + ["Amount", "Class"]
+    df = df[columns_order]
+
+    return df
+
+
+def save_dataset(df, filepath="data/raw/fraud_data.csv"):
+    """
+    Save dataset to specified filepath
+
+    Args:
+        df (pd.DataFrame): Dataset to save
+        filepath (str): Path where to save the dataset
+    """
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+    # Save dataset
+    df.to_csv(filepath, index=False)
+    print(f"Dataset saved to {filepath}")
+
+
+def generate_and_save_data():
+    """Main function to generate and save fraud detection dataset"""
+    print("Generating synthetic fraud detection dataset...")
+
+    # Create dataset
+    fraud_data = create_fraud_dataset(n_samples=100000)
+
+    # Print dataset statistics
+    print("\nDataset Statistics:")
+    print(f"Total transactions: {len(fraud_data):,}")
+    print(f"Fraud transactions: {fraud_data['Class'].sum():,}")
+    print(f"Normal transactions: {(fraud_data['Class'] == 0).sum():,}")
+    print(
+        f"Fraud rate: {fraud_data['Class'].mean():.4f} "
+        f"({fraud_data['Class'].mean() * 100:.2f}%)"
+    )
+    print(f"Average transaction amount: ${fraud_data['Amount'].mean():.2f}")
+    print(f"Dataset shape: {fraud_data.shape}")
+
+    # Save dataset
+    save_dataset(fraud_data)
+
+    # Display first few rows
+    print("\nFirst 5 rows:")
+    print(fraud_data.head())
+
+    return fraud_data
+
 
 if __name__ == "__main__":
-    main()
+    # Generate the dataset
+    dataset = generate_and_save_data()
