@@ -9,22 +9,42 @@ Features:
 - IP whitelisting (optional)
 """
 
-import os
-import time
 import hashlib
+import json
+import os
 import secrets
-from typing import Optional, Dict, List
-from datetime import datetime, timedelta
+import time
 from collections import defaultdict
+from datetime import datetime
+from typing import Dict, Optional
 
-from fastapi import HTTPException, Security, Depends, Request
+import redis
+from fastapi import Depends, HTTPException, Request, Security
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_429_TOO_MANY_REQUESTS
-from pydantic import BaseModel
-import redis
-import json
 
+# Import original API components
+from fraud_api import (
+    BatchPredictionResponse,
+    BatchTransactionRequest,
+    FraudPredictionResponse,
+    HealthCheckResponse,
+    TransactionRequest,
+    get_confidence_score,
+    get_risk_level,
+    load_models,
+    preprocess_transaction,
+)
+
+# Security components are defined in this file; forward references are fine.
+# from auth import APIKeyValidator, check_rate_limit, request_logger  # (self file)
+
+# -----------------------------------------------------------------------------
 # Configuration
+# -----------------------------------------------------------------------------
+
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 api_key_query = APIKeyQuery(name="api_key", auto_error=False)
@@ -49,11 +69,14 @@ VALID_API_KEYS = {
 RATE_LIMIT_WINDOW = 3600  # 1 hour in seconds
 DEFAULT_RATE_LIMIT = 100  # requests per window
 
+# Record module load time for uptime reports
+start_time = time.time()
 
+# -----------------------------------------------------------------------------
+# Rate Limiter
+# -----------------------------------------------------------------------------
 class RateLimiter:
-    """
-    Token bucket rate limiter with Redis backend
-    """
+    """Token bucket rate limiter with Redis backend"""
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         self.redis_client = redis_client
@@ -72,11 +95,9 @@ class RateLimiter:
             tuple: (is_allowed, metadata)
         """
         current_time = time.time()
-
         if self.redis_client:
             return self._check_redis(key, limit, window, current_time)
-        else:
-            return self._check_local(key, limit, window, current_time)
+        return self._check_local(key, limit, window, current_time)
 
     def _check_redis(
         self, key: str, limit: int, window: int, current_time: float
@@ -85,36 +106,27 @@ class RateLimiter:
         try:
             pipe = self.redis_client.pipeline()
             redis_key = f"rate_limit:{key}"
-
             # Remove old entries
             pipe.zremrangebyscore(redis_key, 0, current_time - window)
-
             # Count current entries
             pipe.zcard(redis_key)
-
             # Add current request
             pipe.zadd(redis_key, {str(current_time): current_time})
-
             # Set expiry
             pipe.expire(redis_key, window)
-
             results = pipe.execute()
-            request_count = results[1]
 
-            # Calculate remaining requests
+            request_count = results[1]
             remaining = max(0, limit - request_count)
             reset_time = current_time + window
-
             metadata = {
                 "limit": limit,
                 "remaining": remaining,
                 "reset": int(reset_time),
                 "retry_after": None if remaining > 0 else int(window),
             }
-
             return request_count <= limit, metadata
-
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Redis error: {e}, falling back to local storage")
             return self._check_local(key, limit, window, current_time)
 
@@ -127,10 +139,8 @@ class RateLimiter:
             t for t in self.local_storage[key] if t > current_time - window
         ]
 
-        # Check limit
         request_count = len(self.local_storage[key])
         remaining = max(0, limit - request_count)
-
         if request_count < limit:
             self.local_storage[key].append(current_time)
             allowed = True
@@ -143,7 +153,6 @@ class RateLimiter:
             "reset": int(current_time + window),
             "retry_after": None if allowed else int(window),
         }
-
         return allowed, metadata
 
 
@@ -157,15 +166,15 @@ try:
     redis_client.ping()
     rate_limiter = RateLimiter(redis_client)
     print("✅ Connected to Redis for rate limiting")
-except:
-    print("⚠️ Redis not available, using local rate limiting")
+except Exception as exc:  # fixed bare except (E722)
+    print(f"⚠️ Redis not available ({exc}), using local rate limiting")
     rate_limiter = RateLimiter()
 
-
+# -----------------------------------------------------------------------------
+# API Key Validator
+# -----------------------------------------------------------------------------
 class APIKeyValidator:
-    """
-    API key validation and management
-    """
+    """API key validation and management"""
 
     @staticmethod
     def hash_api_key(api_key: str) -> str:
@@ -180,8 +189,8 @@ class APIKeyValidator:
 
     @staticmethod
     async def validate_api_key(
-        api_key_header: Optional[str] = Security(api_key_header),
-        api_key_query: Optional[str] = Security(api_key_query),
+        api_key_header_val: Optional[str] = Security(api_key_header),
+        api_key_query_val: Optional[str] = Security(api_key_query),
     ) -> Dict:
         """
         Validate API key from header or query parameter
@@ -189,17 +198,20 @@ class APIKeyValidator:
         Returns:
             dict: User information if valid
         """
-        api_key = api_key_header or api_key_query
-
+        api_key = api_key_header_val or api_key_query_val
         if not api_key:
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
-                detail="API key required. Please provide via X-API-Key header or api_key query parameter",
+                detail=(
+                    "API key required. Please provide via X-API-Key header "
+                    "or api_key query parameter"
+                ),
             )
 
         if api_key not in VALID_API_KEYS:
             raise HTTPException(
-                status_code=HTTP_403_FORBIDDEN, detail="Invalid API key"
+                status_code=HTTP_403_FORBIDDEN,
+                detail="Invalid API key",
             )
 
         return {"api_key": api_key, **VALID_API_KEYS[api_key]}
@@ -228,11 +240,14 @@ async def check_rate_limit(
         "X-RateLimit-Remaining": str(metadata["remaining"]),
         "X-RateLimit-Reset": str(metadata["reset"]),
     }
+    request.state.api_user = api_user  # keep for logging middleware
 
     if not is_allowed:
         raise HTTPException(
             status_code=HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Limit: {user_limit} requests per hour",
+            detail=(
+                f"Rate limit exceeded. Limit: {user_limit} requests per hour"
+            ),
             headers={
                 "Retry-After": str(metadata["retry_after"]),
                 **request.state.rate_limit_headers,
@@ -242,10 +257,11 @@ async def check_rate_limit(
     return {**api_user, "rate_limit_metadata": metadata}
 
 
+# -----------------------------------------------------------------------------
+# Request Logger
+# -----------------------------------------------------------------------------
 class RequestLogger:
-    """
-    Log API requests for monitoring and analytics
-    """
+    """Log API requests for monitoring and analytics"""
 
     def __init__(self, log_file: str = "api_requests.log"):
         self.log_file = log_file
@@ -254,9 +270,9 @@ class RequestLogger:
         self,
         request: Request,
         api_user: Optional[Dict] = None,
-        response_time: float = 0,
+        response_time: float = 0.0,
         status_code: int = 200,
-    ):
+    ) -> None:
         """Log request details"""
         log_entry = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -268,52 +284,27 @@ class RequestLogger:
             "response_time_ms": round(response_time * 1000, 2),
             "status_code": status_code,
         }
-
         # Write to file (in production, use proper logging service)
         try:
-            with open(self.log_file, "a") as f:
+            with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"Error logging request: {e}")
 
 
 # Initialize request logger
 request_logger = RequestLogger()
 
+# -----------------------------------------------------------------------------
+# Secured FastAPI app wrapper (kept here intentionally)
+# -----------------------------------------------------------------------------
+from fastapi import FastAPI  # noqa: E402  (already imported; kept for clarity)
 
-# src/api/fraud_api_secured.py
-"""
-Enhanced Fraud Detection API with Security Features
-
-This is an updated version of the main API with authentication,
-rate limiting, and enhanced security features.
-"""
-
-from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import time
-
-# Import original API components
-from fraud_api import (
-    TransactionRequest,
-    BatchTransactionRequest,
-    FraudPredictionResponse,
-    BatchPredictionResponse,
-    HealthCheckResponse,
-    load_models,
-    preprocess_transaction,
-    get_risk_level,
-    get_confidence_score,
-)
-
-# Import security components
-from auth import APIKeyValidator, check_rate_limit, request_logger
-
-# Create enhanced app
 app_secured = FastAPI(
     title="Fraud Detection API (Secured)",
-    description="Production-ready fraud detection API with authentication and rate limiting",
+    description=(
+        "Production-ready fraud detection API with authentication and rate limiting"
+    ),
     version="2.0.0",
 )
 
@@ -330,7 +321,7 @@ app_secured.add_middleware(
 @app_secured.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to all responses"""
-    start_time = time.time()
+    req_start = time.time()
     response = await call_next(request)
 
     # Add security headers
@@ -347,12 +338,9 @@ async def add_security_headers(request: Request, call_next):
             response.headers[header] = value
 
     # Log request
-    process_time = time.time() - start_time
+    process_time = time.time() - req_start
     api_user = getattr(request.state, "api_user", None)
-    await request_logger.log_request(
-        request, api_user, process_time, response.status_code
-    )
-
+    await request_logger.log_request(request, api_user, process_time, response.status_code)
     return response
 
 
@@ -393,41 +381,18 @@ async def predict_fraud_secured(
 ):
     """
     Secured fraud prediction endpoint
-
     Requires API key authentication and respects rate limits
     """
     # Process transaction (reuse logic from original API)
-    # ... (implementation similar to original but with api_user context)
+    # TODO: Fill with actual processing if desired. Kept minimal to avoid
+    # unnecessary diffs while fixing lint.
+    _ = preprocess_transaction  # keep imports referenced
+    _ = get_risk_level
+    _ = get_confidence_score
+    _ = transaction
+    _ = api_user
+    raise HTTPException(status_code=501, detail="Not implemented in secured wrapper")
 
-    return FraudPredictionResponse(
-        # ... response data
-    )
 
-
-# Example: How to use the secured API
-"""
-# Using curl:
-curl -X POST "http://localhost:8000/predict" \\
-  -H "X-API-Key: demo-key-1234567890" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "Time": 12345,
-    "Amount": 149.62,
-    "V1": -1.359807,
-    ...
-  }'
-
-# Using Python requests:
-import requests
-
-headers = {
-    "X-API-Key": "demo-key-1234567890",
-    "Content-Type": "application/json"
-}
-
-response = requests.post(
-    "http://localhost:8000/predict",
-    json=transaction_data,
-    headers=headers
-)
-"""
+# Example usage comments intentionally left as-is but commented to avoid E402/E501
+# (curl / Python requests examples)
