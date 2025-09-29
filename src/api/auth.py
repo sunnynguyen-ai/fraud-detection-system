@@ -60,7 +60,10 @@ class RateLimiter:
         self.local_storage = defaultdict(list) if not redis_client else None
 
     def is_allowed(
-        self, key: str, limit: int = DEFAULT_RATE_LIMIT, window: int = RATE_LIMIT_WINDOW
+        self,
+        key: str,
+        limit: int = DEFAULT_RATE_LIMIT,
+        window: int = RATE_LIMIT_WINDOW,
     ) -> tuple[bool, Dict]:
         """
         Check if request is allowed under rate limit
