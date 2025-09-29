@@ -20,6 +20,7 @@ from typing import Dict, Optional
 
 import redis
 from fastapi import Depends, HTTPException, Request, Security
+from fastapi import FastAPI  # keep import at top (avoid E402)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader, APIKeyQuery
@@ -37,9 +38,6 @@ from fraud_api import (
     load_models,
     preprocess_transaction,
 )
-
-# Security components are defined in this file; forward references are fine.
-# from auth import APIKeyValidator, check_rate_limit, request_logger  # (self file)
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -69,8 +67,8 @@ VALID_API_KEYS = {
 RATE_LIMIT_WINDOW = 3600  # 1 hour in seconds
 DEFAULT_RATE_LIMIT = 100  # requests per window
 
-# Record module load time for uptime reports
-start_time = time.time()
+# Module start time for uptime reporting
+MODULE_START_TIME = time.time()
 
 # -----------------------------------------------------------------------------
 # Rate Limiter
@@ -126,7 +124,7 @@ class RateLimiter:
                 "retry_after": None if remaining > 0 else int(window),
             }
             return request_count <= limit, metadata
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # E722 fixed
             print(f"Redis error: {e}, falling back to local storage")
             return self._check_local(key, limit, window, current_time)
 
@@ -166,7 +164,7 @@ try:
     redis_client.ping()
     rate_limiter = RateLimiter(redis_client)
     print("✅ Connected to Redis for rate limiting")
-except Exception as exc:  # fixed bare except (E722)
+except Exception as exc:  # E722 fixed
     print(f"⚠️ Redis not available ({exc}), using local rate limiting")
     rate_limiter = RateLimiter()
 
@@ -234,20 +232,18 @@ async def check_rate_limit(
         api_user["api_key"], limit=user_limit
     )
 
-    # Add rate limit headers to response
+    # Add rate limit headers to response (middleware will attach)
     request.state.rate_limit_headers = {
         "X-RateLimit-Limit": str(metadata["limit"]),
         "X-RateLimit-Remaining": str(metadata["remaining"]),
         "X-RateLimit-Reset": str(metadata["reset"]),
     }
-    request.state.api_user = api_user  # keep for logging middleware
+    request.state.api_user = api_user
 
     if not is_allowed:
         raise HTTPException(
             status_code=HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Rate limit exceeded. Limit: {user_limit} requests per hour"
-            ),
+            detail=f"Rate limit exceeded. Limit: {user_limit} requests per hour",
             headers={
                 "Retry-After": str(metadata["retry_after"]),
                 **request.state.rate_limit_headers,
@@ -284,11 +280,10 @@ class RequestLogger:
             "response_time_ms": round(response_time * 1000, 2),
             "status_code": status_code,
         }
-        # Write to file (in production, use proper logging service)
         try:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry) + "\n")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"Error logging request: {e}")
 
 
@@ -296,9 +291,8 @@ class RequestLogger:
 request_logger = RequestLogger()
 
 # -----------------------------------------------------------------------------
-# Secured FastAPI app wrapper (kept here intentionally)
+# Secured FastAPI app (kept in this module)
 # -----------------------------------------------------------------------------
-from fastapi import FastAPI  # noqa: E402  (already imported; kept for clarity)
 
 app_secured = FastAPI(
     title="Fraud Detection API (Secured)",
@@ -340,7 +334,9 @@ async def add_security_headers(request: Request, call_next):
     # Log request
     process_time = time.time() - req_start
     api_user = getattr(request.state, "api_user", None)
-    await request_logger.log_request(request, api_user, process_time, response.status_code)
+    await request_logger.log_request(
+        request, api_user, process_time, response.status_code
+    )
     return response
 
 
@@ -370,7 +366,7 @@ async def health_check():
         timestamp=datetime.now().isoformat(),
         model_loaded=True,
         model_load_time=None,
-        uptime_seconds=time.time() - start_time,
+        uptime_seconds=time.time() - MODULE_START_TIME,  # F821 fixed
         version="2.0.0",
     )
 
@@ -383,16 +379,10 @@ async def predict_fraud_secured(
     Secured fraud prediction endpoint
     Requires API key authentication and respects rate limits
     """
-    # Process transaction (reuse logic from original API)
-    # TODO: Fill with actual processing if desired. Kept minimal to avoid
-    # unnecessary diffs while fixing lint.
-    _ = preprocess_transaction  # keep imports referenced
+    # Reuse logic from original API (placeholders kept to avoid large diffs)
+    _ = preprocess_transaction
     _ = get_risk_level
     _ = get_confidence_score
     _ = transaction
     _ = api_user
     raise HTTPException(status_code=501, detail="Not implemented in secured wrapper")
-
-
-# Example usage comments intentionally left as-is but commented to avoid E402/E501
-# (curl / Python requests examples)
