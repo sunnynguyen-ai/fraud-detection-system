@@ -684,9 +684,7 @@ class EnsembleFraudDetector:
                 )
 
             # Sort by absolute SHAP value
-            feature_contributions.sort(
-                key=lambda x: abs(x["shap_value"]), reverse=True
-            )
+            feature_contributions.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
 
             return {
                 "prediction_probability": float(prediction),
