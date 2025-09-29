@@ -41,7 +41,7 @@ class LogisticRegressionDetector:
         y_pred = self.model.predict(X_test)
         y_prob = self.model.predict_proba(X_test)[:, 1]
 
-        # --- E501 fix: wrap the long classification_report call ---
+        # Wrap long classification_report call to satisfy E501
         report_text = classification_report(
             y_test,
             y_pred,
@@ -69,5 +69,5 @@ class LogisticRegressionDetector:
 
 
 def finalize_training() -> None:
-    # --- F541 fix: no f-string since there are no placeholders ---
+    # No f-string since there are no placeholders (fixes F541)
     print("Training complete.")
