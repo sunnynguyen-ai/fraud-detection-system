@@ -920,6 +920,7 @@ class AdvancedFeatureEngineering:
         return df
 
 
+
     def fit_transform(self, df: pd.DataFrame, target_column: Optional[str] = None) -> pd.DataFrame:
         """
         Fit the complete feature engineering pipeline and transform data
