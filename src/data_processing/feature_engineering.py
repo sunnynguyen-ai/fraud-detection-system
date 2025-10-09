@@ -664,7 +664,6 @@ class AdvancedFeatureEngineering:
                         self.encoders[f"{column}_categories"] = df[column].unique()
                     else:
                         if f"{column}_categories" in self.encoders:
-                            known_categories = self.encoders[f"{column}_categories"]
                             dummies = pd.get_dummies(df[column], prefix=column, drop_first=True)
                             df = pd.concat([df.drop(column, axis=1), dummies], axis=1)
 
