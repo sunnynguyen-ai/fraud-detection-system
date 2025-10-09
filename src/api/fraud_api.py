@@ -1,344 +1,541 @@
-# Dockerfile.production
-FROM python:3.11-slim as builder
+"""
+Real-Time Fraud Detection API
 
-# Build arguments
-ARG PYTHON_VERSION=3.11
+Production-ready FastAPI application for real-time fraud detection with:
+- Real-time transaction processing
+- ML model inference with ensemble predictions
+- SHAP explainability for decision transparency
+- Comprehensive request validation
+- Detailed response formatting
+- Performance monitoring and logging
+- Health checks and status endpoints
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+Author: Sunny Nguyen
+"""
 
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+import logging
+import os
+import time
+import warnings
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-# Copy and install requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# ML and data processing
+import joblib
+import pandas as pd
 
-# Production stage
-FROM python:3.11-slim
+# FastAPI imports
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, validator
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+warnings.filterwarnings("ignore")
 
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-# Set environment variables
-ENV PATH="/opt/venv/bin:$PATH" \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    PORT=8000
+# Initialize FastAPI app
+app = FastAPI(
+    title="Fraud Detection API",
+    description="Real-time fraud detection system using ensemble machine learning models",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/models /app/logs /app/cache && \
-    chown -R appuser:appuser /app
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify allowed origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Set working directory
-WORKDIR /app
+# Global variables for loaded models
+feature_pipeline = None
+ensemble_model = None
+model_loaded = False
+model_load_time = None
 
-# Copy application code
-COPY --chown=appuser:appuser src/ ./src/
-COPY --chown=appuser:appuser models/ ./models/
 
-# Switch to non-root user
-USER appuser
+class TransactionRequest(BaseModel):
+    """
+    Pydantic model for transaction data validation
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/health || exit 1
+    This model ensures that incoming transaction data meets the required
+    format and constraints for fraud detection processing.
+    """
 
-# Expose port
-EXPOSE ${PORT}
+    # Core transaction fields
+    Time: float = Field(..., ge=0, description="Time in seconds from reference point")
+    Amount: float = Field(..., ge=0, description="Transaction amount in USD")
 
-# Run the application
-CMD ["uvicorn", "src.api.fraud_api:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "4", \
-     "--loop", "uvloop", \
-     "--log-level", "info"]
+    # V1-V20 features (anonymized features from PCA transformation)
+    V1: float = Field(..., description="Anonymized feature V1")
+    V2: float = Field(..., description="Anonymized feature V2")
+    V3: float = Field(..., description="Anonymized feature V3")
+    V4: float = Field(..., description="Anonymized feature V4")
+    V5: float = Field(..., description="Anonymized feature V5")
+    V6: float = Field(..., description="Anonymized feature V6")
+    V7: float = Field(..., description="Anonymized feature V7")
+    V8: float = Field(..., description="Anonymized feature V8")
+    V9: float = Field(..., description="Anonymized feature V9")
+    V10: float = Field(..., description="Anonymized feature V10")
+    V11: float = Field(..., description="Anonymized feature V11")
+    V12: float = Field(..., description="Anonymized feature V12")
+    V13: float = Field(..., description="Anonymized feature V13")
+    V14: float = Field(..., description="Anonymized feature V14")
+    V15: float = Field(..., description="Anonymized feature V15")
+    V16: float = Field(..., description="Anonymized feature V16")
+    V17: float = Field(..., description="Anonymized feature V17")
+    V18: float = Field(..., description="Anonymized feature V18")
+    V19: float = Field(..., description="Anonymized feature V19")
+    V20: float = Field(..., description="Anonymized feature V20")
 
----
+    # Optional metadata
+    transaction_id: Optional[str] = Field(
+        None, description="Unique transaction identifier"
+    )
 
-# docker-compose.production.yml
-version: '3.8'
+    @validator("Amount")
+    def amount_must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError("Amount must be non-negative")
+        if v > 100000:  # Reasonable upper limit
+            logger.warning(f"Very large transaction amount: ${v:,.2f}")
+        return v
 
-services:
-  redis:
-    image: redis:7-alpine
-    container_name: fraud-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - fraud-network
+    @validator("Time")
+    def time_must_be_valid(cls, v):
+        if v < 0:
+            raise ValueError("Time must be non-negative")
+        return v
 
-  fraud-api:
-    build:
-      context: .
-      dockerfile: Dockerfile.production
-    container_name: fraud-api
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - RATE_LIMIT_REQUESTS=100
-      - RATE_LIMIT_WINDOW=60
-      - MODEL_CACHE_TTL=3600
-      - PREDICTION_CACHE_SIZE=1000
-      - BATCH_MAX_SIZE=1000
-      - API_KEYS=${API_KEYS:-demo-key-123}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-*}
-      - ENABLE_WEBSOCKET=true
-      - ENABLE_CACHING=true
-      - ENABLE_METRICS=true
-      - ALERT_FRAUD_THRESHOLD=0.8
-      - LOG_SLOW_PREDICTIONS=1.0
-      - LOG_LEVEL=info
-    volumes:
-      - ./models:/app/models:ro
-      - ./logs:/app/logs
-      - ./cache:/app/cache
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    networks:
-      - fraud-network
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
-  nginx:
-    image: nginx:alpine
-    container_name: fraud-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - fraud-api
-    networks:
-      - fraud-network
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+class BatchTransactionRequest(BaseModel):
+    """Model for batch transaction processing"""
 
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: fraud-prometheus
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=30d'
-    networks:
-      - fraud-network
+    transactions: List[TransactionRequest] = Field(..., min_items=1, max_items=1000)
 
-  grafana:
-    image: grafana/grafana:latest
-    container_name: fraud-grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_INSTALL_PLUGINS=redis-datasource
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
-    depends_on:
-      - prometheus
-    networks:
-      - fraud-network
 
-volumes:
-  redis_data:
-  prometheus_data:
-  grafana_data:
+class FraudPredictionResponse(BaseModel):
+    """
+    Response model for fraud prediction results
+    """
 
-networks:
-  fraud-network:
-    driver: bridge
+    transaction_id: Optional[str]
+    fraud_probability: float = Field(..., ge=0, le=1)
+    is_fraud: bool
+    risk_level: str = Field(..., regex="^(LOW|MEDIUM|HIGH|CRITICAL)$")
+    confidence_score: float = Field(..., ge=0, le=1)
 
----
+    # Model explanation
+    explanation: Optional[Dict[str, Any]] = None
+    top_risk_factors: Optional[List[Dict[str, Any]]] = None
 
-# nginx.conf
-events {
-    worker_connections 1024;
-}
+    # Metadata
+    processing_time_ms: float
+    model_version: str
+    timestamp: str
 
-http {
-    upstream fraud_api {
-        least_conn;
-        server fraud-api:8000 max_fails=3 fail_timeout=30s;
+
+class BatchPredictionResponse(BaseModel):
+    """Response model for batch predictions"""
+
+    predictions: List[FraudPredictionResponse]
+    batch_summary: Dict[str, Any]
+    total_processing_time_ms: float
+
+
+class HealthCheckResponse(BaseModel):
+    """Health check response model"""
+
+    status: str
+    timestamp: str
+    model_loaded: bool
+    model_load_time: Optional[str]
+    uptime_seconds: float
+    version: str
+
+
+# Global performance tracking
+request_count = 0
+total_processing_time = 0
+start_time = time.time()
+
+
+def load_models():
+    """
+    Load the trained models and preprocessing pipeline
+
+    This function loads the feature engineering pipeline and ensemble model
+    that were trained and saved during the model development phase.
+    """
+    global feature_pipeline, ensemble_model, model_loaded, model_load_time
+
+    try:
+        logger.info("Loading fraud detection models...")
+
+        # Define model paths
+        models_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models"
+        )
+        fe_path = os.path.join(models_dir, "feature_engineering_pipeline.pkl")
+        ensemble_path = os.path.join(models_dir, "fraud_detection_ensemble.pkl")
+
+        # Check if model files exist
+        if not os.path.exists(fe_path):
+            logger.error(f"Feature engineering pipeline not found at {fe_path}")
+            return False
+
+        if not os.path.exists(ensemble_path):
+            logger.error(f"Ensemble model not found at {ensemble_path}")
+            return False
+
+        # Load feature engineering pipeline
+        feature_pipeline = joblib.load(fe_path)
+        logger.info("✅ Feature engineering pipeline loaded")
+
+        # Load ensemble model
+        ensemble_model = joblib.load(ensemble_path)
+        logger.info("✅ Ensemble model loaded")
+
+        model_loaded = True
+        model_load_time = datetime.now().isoformat()
+        logger.info("🎯 All models loaded successfully!")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Error loading models: {str(e)}")
+        return False
+
+
+def preprocess_transaction(transaction: TransactionRequest) -> pd.DataFrame:
+    """
+    Preprocess a single transaction for model inference
+
+    Args:
+        transaction: Transaction data
+
+    Returns:
+        Preprocessed features as DataFrame
+    """
+    try:
+        # Convert to DataFrame
+        transaction_dict = transaction.dict()
+        # Remove non-feature fields
+        transaction_dict.pop("transaction_id", None)
+
+        df = pd.DataFrame([transaction_dict])
+
+        # Apply feature engineering pipeline
+        if feature_pipeline and feature_pipeline.is_fitted:
+            df_processed = feature_pipeline.transform(df)
+        else:
+            # Fallback: use raw features if pipeline not available
+            logger.warning("Feature pipeline not available, using raw features")
+            df_processed = df
+
+        return df_processed
+
+    except Exception as e:
+        logger.error(f"Error preprocessing transaction: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Preprocessing error: {str(e)}")
+
+
+def get_risk_level(probability: float) -> str:
+    """Determine risk level based on fraud probability"""
+    if probability >= 0.9:
+        return "CRITICAL"
+    elif probability >= 0.7:
+        return "HIGH"
+    elif probability >= 0.3:
+        return "MEDIUM"
+    else:
+        return "LOW"
+
+
+def get_confidence_score(probability: float) -> float:
+    """Calculate confidence score based on distance from decision boundary"""
+    # Confidence is higher when probability is closer to 0 or 1
+    return abs(probability - 0.5) * 2
+
+
+async def check_model_dependency():
+    """Dependency to ensure models are loaded"""
+    if not model_loaded:
+        raise HTTPException(
+            status_code=503,
+            detail="Models not loaded. Please check server logs and restart if necessary.",
+        )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Load models when the application starts"""
+    logger.info("🚀 Starting Fraud Detection API...")
+    success = load_models()
+    if not success:
+        logger.error("❌ Failed to load models during startup")
+    else:
+        logger.info("✅ API startup completed successfully")
+
+
+@app.get("/", response_model=Dict[str, str])
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "Fraud Detection API",
+        "version": "1.0.0",
+        "status": "active",
+        "docs": "/docs",
+        "health": "/health",
     }
 
-    # Rate limiting
-    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
-    limit_req_status 429;
 
-    # Caching
-    proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=api_cache:10m max_size=100m inactive=60m use_temp_path=off;
+@app.get("/health", response_model=HealthCheckResponse)
+async def health_check():
+    """Health check endpoint"""
+    return HealthCheckResponse(
+        status="healthy" if model_loaded else "unhealthy",
+        timestamp=datetime.now().isoformat(),
+        model_loaded=model_loaded,
+        model_load_time=model_load_time,
+        uptime_seconds=time.time() - start_time,
+        version="1.0.0",
+    )
 
-    server {
-        listen 80;
-        server_name localhost;
 
-        # Security headers
-        add_header X-Frame-Options "SAMEORIGIN" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header X-XSS-Protection "1; mode=block" always;
-        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+@app.post("/predict", response_model=FraudPredictionResponse)
+async def predict_fraud(
+    transaction: TransactionRequest,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(check_model_dependency),
+):
+    """
+    Predict fraud probability for a single transaction
 
-        # Gzip compression
-        gzip on;
-        gzip_vary on;
-        gzip_min_length 1000;
-        gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    This endpoint processes a transaction and returns:
+    - Fraud probability (0-1)
+    - Binary fraud classification
+    - Risk level assessment
+    - Model explanation (if available)
+    - Processing metadata
+    """
+    global request_count, total_processing_time
 
-        # Health check endpoint (no rate limiting)
-        location /health {
-            proxy_pass http://fraud_api;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            access_log off;
+    start_time_ms = time.time() * 1000
+
+    try:
+        # Preprocess transaction
+        df_processed = preprocess_transaction(transaction)
+
+        # Get ensemble prediction
+        fraud_probability = ensemble_model.predict_proba(df_processed)[0, 1]
+        is_fraud = fraud_probability > 0.5
+
+        # Calculate metrics
+        risk_level = get_risk_level(fraud_probability)
+        confidence_score = get_confidence_score(fraud_probability)
+
+        # Get explanation (if available)
+        explanation = None
+        top_risk_factors = None
+
+        try:
+            if hasattr(ensemble_model, "explain_prediction"):
+                explanation_result = ensemble_model.explain_prediction(df_processed, 0)
+                if "top_features" in explanation_result:
+                    top_risk_factors = explanation_result["top_features"][:3]
+                explanation = {
+                    "method": "SHAP",
+                    "available": True,
+                    "top_features_count": len(
+                        explanation_result.get("top_features", [])
+                    ),
+                }
+        except Exception as e:
+            logger.warning(f"Could not generate explanation: {str(e)}")
+            explanation = {"method": "SHAP", "available": False, "error": str(e)}
+
+        # Calculate processing time
+        processing_time_ms = time.time() * 1000 - start_time_ms
+
+        # Update global metrics
+        request_count += 1
+        total_processing_time += processing_time_ms
+
+        # Log prediction
+        logger.info(
+            f"Prediction - ID: {transaction.transaction_id}, "
+            f"Probability: {fraud_probability:.4f}, "
+            f"Risk: {risk_level}, "
+            f"Time: {processing_time_ms:.2f}ms"
+        )
+
+        return FraudPredictionResponse(
+            transaction_id=transaction.transaction_id,
+            fraud_probability=round(fraud_probability, 4),
+            is_fraud=is_fraud,
+            risk_level=risk_level,
+            confidence_score=round(confidence_score, 4),
+            explanation=explanation,
+            top_risk_factors=top_risk_factors,
+            processing_time_ms=round(processing_time_ms, 2),
+            model_version="ensemble-v1.0",
+            timestamp=datetime.now().isoformat(),
+        )
+
+    except Exception as e:
+        logger.error(f"Error during prediction: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+
+@app.post("/predict/batch", response_model=BatchPredictionResponse)
+async def predict_fraud_batch(
+    batch_request: BatchTransactionRequest,
+    _: None = Depends(check_model_dependency),
+):
+    """
+    Predict fraud probability for multiple transactions
+
+    Processes up to 1000 transactions in a single request for efficient
+    batch processing.
+    """
+    start_time_ms = time.time() * 1000
+
+    try:
+        predictions = []
+        fraud_count = 0
+        high_risk_count = 0
+
+        for transaction in batch_request.transactions:
+            # Process each transaction
+            df_processed = preprocess_transaction(transaction)
+            fraud_probability = ensemble_model.predict_proba(df_processed)[0, 1]
+            is_fraud = fraud_probability > 0.5
+            risk_level = get_risk_level(fraud_probability)
+
+            if is_fraud:
+                fraud_count += 1
+            if risk_level in ["HIGH", "CRITICAL"]:
+                high_risk_count += 1
+
+            predictions.append(
+                FraudPredictionResponse(
+                    transaction_id=transaction.transaction_id,
+                    fraud_probability=round(fraud_probability, 4),
+                    is_fraud=is_fraud,
+                    risk_level=risk_level,
+                    confidence_score=round(get_confidence_score(fraud_probability), 4),
+                    processing_time_ms=0,  # Will be updated with batch time
+                    model_version="ensemble-v1.0",
+                    timestamp=datetime.now().isoformat(),
+                )
+            )
+
+        total_processing_time_ms = time.time() * 1000 - start_time_ms
+        avg_processing_time = total_processing_time_ms / len(predictions)
+
+        # Update individual processing times
+        for pred in predictions:
+            pred.processing_time_ms = round(avg_processing_time, 2)
+
+        batch_summary = {
+            "total_transactions": len(predictions),
+            "fraud_detected": fraud_count,
+            "high_risk_transactions": high_risk_count,
+            "fraud_rate": round(fraud_count / len(predictions), 4),
+            "average_processing_time_ms": round(avg_processing_time, 2),
         }
 
-        # Metrics endpoint (restricted)
-        location /metrics {
-            allow 127.0.0.1;
-            allow 10.0.0.0/8;
-            deny all;
-            proxy_pass http://fraud_api;
-        }
+        logger.info(
+            f"Batch prediction - {len(predictions)} transactions, "
+            f"{fraud_count} fraud detected"
+        )
 
-        # WebSocket endpoint
-        location /ws {
-            proxy_pass http://fraud_api;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_read_timeout 86400;
-        }
+        return BatchPredictionResponse(
+            predictions=predictions,
+            batch_summary=batch_summary,
+            total_processing_time_ms=round(total_processing_time_ms, 2),
+        )
 
-        # API endpoints with rate limiting
-        location / {
-            limit_req zone=api_limit burst=20 nodelay;
-            
-            # Caching for GET requests
-            proxy_cache api_cache;
-            proxy_cache_valid 200 1m;
-            proxy_cache_use_stale error timeout http_500 http_502 http_503 http_504;
-            proxy_cache_bypass $http_authorization;
-            
-            proxy_pass http://fraud_api;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            
-            # Timeouts
-            proxy_connect_timeout 30s;
-            proxy_send_timeout 30s;
-            proxy_read_timeout 30s;
-        }
+    except Exception as e:
+        logger.error(f"Error during batch prediction: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch prediction error: {str(e)}")
+
+
+@app.get("/metrics")
+async def get_metrics():
+    """Get API performance metrics"""
+    uptime = time.time() - start_time
+    avg_processing_time = (
+        total_processing_time / request_count if request_count > 0 else 0
+    )
+
+    return {
+        "requests_processed": request_count,
+        "average_processing_time_ms": round(avg_processing_time, 2),
+        "total_processing_time_ms": round(total_processing_time, 2),
+        "uptime_seconds": round(uptime, 2),
+        "requests_per_second": round(request_count / uptime, 2) if uptime > 0 else 0,
+        "model_loaded": model_loaded,
+        "timestamp": datetime.now().isoformat(),
     }
-}
 
----
 
-# prometheus.yml
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+@app.post("/reload-models")
+async def reload_models():
+    """Reload models without restarting the API"""
+    try:
+        success = load_models()
+        if success:
+            return {
+                "message": "Models reloaded successfully",
+                "timestamp": datetime.now().isoformat(),
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to reload models")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reloading models: {str(e)}")
 
-scrape_configs:
-  - job_name: 'fraud-api'
-    static_configs:
-      - targets: ['fraud-api:8000']
-    metrics_path: '/metrics'
-    
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis:6379']
-      
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['nginx:9113']
 
----
+# Error handlers
+@app.exception_handler(404)
+async def not_found_handler(request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={
+            "detail": "Endpoint not found",
+            "available_endpoints": ["/", "/health", "/predict", "/docs"],
+        },
+    )
 
-# .env.production
-# API Configuration
-API_KEYS=your-secure-api-key-here,another-api-key
-ALLOWED_ORIGINS=https://yourdomain.com,https://api.yourdomain.com
-TRUSTED_HOSTS=yourdomain.com,api.yourdomain.com
 
-# Redis Configuration
-REDIS_URL=redis://redis:6379
+@app.exception_handler(500)
+async def internal_error_handler(request, exc):
+    logger.error(f"Internal server error: {str(exc)}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "timestamp": datetime.now().isoformat(),
+        },
+    )
 
-# Rate Limiting
-RATE_LIMIT_REQUESTS=100
-RATE_LIMIT_WINDOW=60
 
-# Model Configuration
-MODEL_CACHE_TTL=3600
-PREDICTION_CACHE_SIZE=1000
-BATCH_MAX_SIZE=1000
+if __name__ == "__main__":
+    import uvicorn
 
-# Features
-ENABLE_WEBSOCKET=true
-ENABLE_CACHING=true
-ENABLE_METRICS=true
-
-# Monitoring
-ALERT_FRAUD_THRESHOLD=0.8
-LOG_SLOW_PREDICTIONS=1.0
-
-# Grafana
-GRAFANA_PASSWORD=secure-password-here
+    # Run the API
+    logger.info("🚀 Starting Fraud Detection API server...")
+    uvicorn.run(
+        "fraud_api:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+    )
