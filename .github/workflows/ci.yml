@@ -33,15 +33,18 @@ jobs:
       - name: Run Black formatter
         run: black src/ tests/
 
+      - name: Run isort (format imports)
+        run: isort --profile black --line-length 120 --filter-files src/ tests/
+
+      - name: Run isort import checker
+        run: isort --check-only --diff --profile black --line-length 120 --filter-files src/ tests/
+
       - name: Run Flake8 linter
         run: |
           flake8 src/ tests/ \
             --max-line-length=120 \
             --ignore=E203,W503 \
             --per-file-ignores="tests/*:E402"
-
-      - name: Run isort import checker
-        run: isort --check-only src/ tests/
 
       - name: Run mypy type checker
         run: mypy src/ --ignore-missing-imports
