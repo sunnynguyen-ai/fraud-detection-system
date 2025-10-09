@@ -1,0 +1,210 @@
+# Feature Engineering Configuration
+# =================================
+# Configuration file for the enhanced feature engineering pipeline
+# Author: Sunny Nguyen
+# Version: 2.0.0
+
+# Feature Creation Settings
+# -------------------------
+feature_creation:
+  # Time-based features
+  time_features:
+    enabled: true
+    cyclical_encoding: true
+    holiday_detection: false  # Requires holiday calendar
+    time_zones: false  # For multi-region fraud detection
+    
+  # Amount-based features
+  amount_features:
+    enabled: true
+    transformations:
+      - log
+      - sqrt
+      - cbrt
+      - boxcox
+    outlier_methods:
+      - zscore
+      - iqr
+      - isolation_forest
+    benford_law: true
+    
+  # Statistical features from V columns
+  statistical_features:
+    enabled: true
+    compute_moments: true
+    compute_entropy: true
+    compute_norms: true
+    max_pca_components: 3
+    
+  # Velocity and frequency analysis
+  velocity_features:
+    enabled: true
+    rolling_windows:
+      - 10
+      - 30
+      - 100
+    compute_acceleration: true
+    
+  # Anomaly detection features
+  anomaly_features:
+    enabled: true
+    methods:
+      - isolation_forest
+      - mahalanobis
+      - local_outlier_factor
+    contamination: 0.1
+    n_estimators: 100
+    
+  # Clustering-based features
+  clustering_features:
+    enabled: true
+    algorithms:
+      kmeans:
+        n_clusters: 5
+        n_init: 10
+      dbscan:
+        eps: 0.5
+        min_samples: 5
+        max_samples: 50000  # Performance limit
+        
+  # Feature interactions
+  interaction_features:
+    enabled: true
+    max_interaction_pairs: 15
+    include_polynomial: false
+    polynomial_degree: 2
+    
+# Data Processing Settings
+# ------------------------
+data_processing:
+  # Missing value handling
+  missing_values:
+    strategy: smart  # Options: smart, median, mean, mode, knn, iterative
+    create_indicators: true
+    indicator_threshold: 0.05  # Create indicator if >5% missing
+    
+  # Categorical encoding
+  categorical_encoding:
+    binary_method: label_encoding
+    low_cardinality_method: one_hot  # <= 10 unique values
+    high_cardinality_method: target_encoding  # > 10 unique values
+    handle_unknown: replace_with_mode
+    
+  # Feature scaling
+  scaling:
+    method: robust  # Options: standard, robust, minmax, quantile, power
+    exclude_binary: true
+    per_feature_scaling: false
+    
+# Feature Selection Settings
+# --------------------------
+feature_selection:
+  enabled: true
+  method: mutual_info  # Options: f_classif, chi2, mutual_info, rfe, lasso
+  n_features: 50
+  variance_threshold: 0.01
+  correlation_threshold: 0.95  # Remove highly correlated features
+  
+# Dimensionality Reduction
+# ------------------------
+dimensionality_reduction:
+  pca:
+    enabled: true
+    n_components: 0.95  # Keep 95% variance, or specify integer
+    whiten: false
+    
+  truncated_svd:
+    enabled: false
+    n_components: 50
+    
+  lda:
+    enabled: false
+    n_components: 10
+    
+# Performance Settings
+# --------------------
+performance:
+  chunk_size: 10000  # Process data in chunks for large datasets
+  n_jobs: -1  # Use all CPU cores
+  memory_limit: 8GB
+  use_dask: false  # For very large datasets
+  cache_features: true
+  parallel_feature_creation: true
+  
+# Monitoring and Logging
+# ----------------------
+monitoring:
+  track_feature_importance: true
+  save_feature_metadata: true
+  log_level: INFO
+  profile_performance: true
+  alert_on_drift: true
+  drift_threshold: 0.1
+  
+# Feature Store Integration
+# -------------------------
+feature_store:
+  enabled: false  # Set to true if using feature store
+  backend: redis  # Options: redis, feast, tecton, databricks
+  cache_ttl: 3600  # Cache time-to-live in seconds
+  
+  redis:
+    host: localhost
+    port: 6379
+    db: 0
+    
+# Model-Specific Settings
+# -----------------------
+model_specific:
+  # Settings for different model types
+  xgboost:
+    create_interaction_features: true
+    create_polynomial_features: false
+    
+  neural_network:
+    normalize_features: true
+    create_embedding_features: false
+    
+  random_forest:
+    create_binned_features: true
+    handle_missing_as_category: true
+    
+# Validation Settings
+# -------------------
+validation:
+  cross_validate_features: true
+  n_folds: 5
+  stratified: true
+  feature_stability_check: true
+  
+# Export Settings
+# ---------------
+export:
+  format: parquet  # Options: parquet, csv, feather, hdf5
+  compression: snappy
+  include_metadata: true
+  version_features: true
+  
+# Environment-Specific Overrides
+# -------------------------------
+environments:
+  development:
+    feature_selection:
+      n_features: 30
+    performance:
+      chunk_size: 5000
+      
+  staging:
+    feature_selection:
+      n_features: 40
+    monitoring:
+      profile_performance: true
+      
+  production:
+    feature_selection:
+      n_features: 50
+    performance:
+      chunk_size: 20000
+      use_dask: true
+    monitoring:
+      alert_on_drift: true
