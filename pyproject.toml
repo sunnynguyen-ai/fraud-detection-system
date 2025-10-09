@@ -1,0 +1,7 @@
+[tool.isort]
+profile = "black"
+line_length = 120
+src_paths = ["src", "tests"]
+known_first_party = ["src"]
+combine_as_imports = true
+force_alphabetical_sort = true
