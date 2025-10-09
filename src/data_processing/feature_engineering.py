@@ -19,13 +19,13 @@ import hashlib
 import json
 import warnings
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union
+from datetime import datetime
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.special import boxcox1p
+# from scipy.special import boxcox1p  # (unused)
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.ensemble import IsolationForest
@@ -58,8 +58,7 @@ class FeatureConfig:
     enable_polynomial_features: bool = False
 
     # Scaling configuration
-    # one of: "standard", "robust", "minmax", "quantile", "power"
-    scaling_method: str = "robust"
+    scaling_method: str = "robust"  # "standard", "robust", "minmax", "quantile", "power"
 
     # Feature selection
     feature_selection_method: str = "mutual_info"  # "f_classif", "chi2", "mutual_info"
@@ -158,6 +157,12 @@ class AdvancedFeatureEngineering:
     def create_time_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Enhanced time-based feature extraction with cyclical encoding
+
+        Args:
+            df: Input dataframe with 'Time' column
+
+        Returns:
+            DataFrame with additional time features
         """
         if not self.config.enable_time_features:
             return df
@@ -185,11 +190,11 @@ class AdvancedFeatureEngineering:
             df["is_lunch_time"] = ((df["hour"] >= 12) & (df["hour"] <= 14)).astype(int)
             df["is_evening"] = ((df["hour"] >= 18) & (df["hour"] <= 21)).astype(int)
 
-            # Holiday indicators (simplified)
+            # Holiday indicators (simplified - would use holiday calendar in production)
             df["is_month_end"] = (df["day_of_month"] >= 28).astype(int)
             df["is_month_start"] = (df["day_of_month"] <= 3).astype(int)
 
-            # Time since reference (normalized)
+            # Time since reference
             df["time_normalized"] = df["Time"] / df["Time"].max() if df["Time"].max() > 0 else 0
 
             self.feature_creation_time["time_features"] = datetime.now()
@@ -199,6 +204,12 @@ class AdvancedFeatureEngineering:
     def create_amount_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Advanced amount-based features with distribution analysis
+
+        Args:
+            df: Input dataframe with 'Amount' column
+
+        Returns:
+            DataFrame with additional amount features
         """
         if not self.config.enable_amount_features:
             return df
@@ -244,7 +255,7 @@ class AdvancedFeatureEngineering:
                 lambda x: len(str(x).split(".")[-1]) if "." in str(x) else 0
             )
 
-            # Benford's Law features
+            # Benford's Law features (first digit distribution)
             df["amount_first_digit"] = df["Amount"].apply(
                 lambda x: int(str(x).replace(".", "")[0]) if x > 0 else 0
             )
@@ -265,6 +276,12 @@ class AdvancedFeatureEngineering:
     def create_velocity_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Create velocity and frequency features for behavioral analysis
+
+        Args:
+            df: Input dataframe
+
+        Returns:
+            DataFrame with velocity features
         """
         if not self.config.enable_velocity_features:
             return df
@@ -286,9 +303,7 @@ class AdvancedFeatureEngineering:
                 df_sorted[f"velocity_{window}"] = (
                     df_sorted["Amount"].rolling(window, min_periods=1).sum()
                     / (
-                        df_sorted["time_since_last_fillna"]
-                        .rolling(window, min_periods=1)
-                        .sum()
+                        df_sorted["time_since_last_fillna"].rolling(window, min_periods=1).sum()
                         + 1e-8
                     )
                 )
@@ -326,6 +341,12 @@ class AdvancedFeatureEngineering:
     def create_statistical_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Enhanced statistical features from V1-V28 columns
+
+        Args:
+            df: Input dataframe with V columns
+
+        Returns:
+            DataFrame with statistical features
         """
         if not self.config.enable_statistical_features:
             return df
@@ -344,9 +365,9 @@ class AdvancedFeatureEngineering:
             df["v_skew"] = v_data.skew(axis=1)
             df["v_kurt"] = v_data.kurtosis(axis=1)
             df["v_median"] = v_data.median(axis=1)
-            df["v_mad"] = np.abs(v_data - v_data.median(axis=1).values.reshape(-1, 1)).median(
-                axis=1
-            )
+            df["v_mad"] = np.abs(
+                v_data - v_data.median(axis=1).values.reshape(-1, 1)
+            ).median(axis=1)
 
             # Range and quartiles
             df["v_max"] = v_data.max(axis=1)
@@ -366,9 +387,9 @@ class AdvancedFeatureEngineering:
 
             # Entropy and energy
             df["v_entropy"] = -(v_data * np.log(np.abs(v_data) + 1e-8)).sum(axis=1)
-            df["v_energy"] = (v_data**2).sum(axis=1)
+            df["v_energy"] = (v_data ** 2).sum(axis=1)
             df["v_l1_norm"] = np.abs(v_data).sum(axis=1)
-            df["v_l2_norm"] = np.sqrt((v_data**2).sum(axis=1))
+            df["v_l2_norm"] = np.sqrt((v_data ** 2).sum(axis=1))
             df["v_linf_norm"] = np.abs(v_data).max(axis=1)
 
             # Zero crossing and sign changes
@@ -381,7 +402,7 @@ class AdvancedFeatureEngineering:
             df["v_outliers_2sigma"] = (v_zscores > 2).sum(axis=1)
             df["v_outliers_3sigma"] = (v_zscores > 3).sum(axis=1)
 
-            # Correlation-style features
+            # Correlation features
             if "Amount" in df.columns:
                 for i, col in enumerate(v_columns[:5]):  # Top 5 for efficiency
                     df[f"{col}_amount_corr"] = v_data[col] * df["Amount"]
@@ -406,6 +427,13 @@ class AdvancedFeatureEngineering:
     def create_anomaly_features(self, df: pd.DataFrame, fit: bool = True) -> pd.DataFrame:
         """
         Create anomaly detection features using unsupervised methods
+
+        Args:
+            df: Input dataframe
+            fit: Whether to fit new anomaly detectors
+
+        Returns:
+            DataFrame with anomaly scores
         """
         if not self.config.enable_anomaly_features:
             return df
@@ -422,7 +450,9 @@ class AdvancedFeatureEngineering:
 
             # Isolation Forest
             if fit:
-                iso_forest = IsolationForest(contamination=0.1, random_state=42, n_estimators=100)
+                iso_forest = IsolationForest(
+                    contamination=0.1, random_state=42, n_estimators=100
+                )
                 df["anomaly_score_iforest"] = iso_forest.fit_predict(X)
                 df["anomaly_score_iforest_raw"] = iso_forest.score_samples(X)
                 self.anomaly_detectors["isolation_forest"] = iso_forest
@@ -431,7 +461,8 @@ class AdvancedFeatureEngineering:
                 df["anomaly_score_iforest"] = iso_forest.predict(X)
                 df["anomaly_score_iforest_raw"] = iso_forest.score_samples(X)
 
-            # Simple Mahalanobis distance as a fast proxy
+            # Local Outlier Factor (approximation for speed)
+            # In production, use sklearn's LocalOutlierFactor
             df["anomaly_mahalanobis"] = self._mahalanobis_distance(X)
 
             self.feature_creation_time["anomaly_features"] = datetime.now()
@@ -441,6 +472,13 @@ class AdvancedFeatureEngineering:
     def create_clustering_features(self, df: pd.DataFrame, fit: bool = True) -> pd.DataFrame:
         """
         Create clustering-based features for pattern recognition
+
+        Args:
+            df: Input dataframe
+            fit: Whether to fit new clustering models
+
+        Returns:
+            DataFrame with cluster assignments and distances
         """
         if not self.config.enable_clustering_features:
             return df
@@ -477,6 +515,12 @@ class AdvancedFeatureEngineering:
     def create_interaction_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Create sophisticated interaction features between variables
+
+        Args:
+            df: Input dataframe
+
+        Returns:
+            DataFrame with interaction features
         """
         if not self.config.enable_interaction_features:
             return df
@@ -502,6 +546,7 @@ class AdvancedFeatureEngineering:
         v_columns = [col for col in df.columns if col.startswith("V") and col[1:].isdigit()]
 
         if len(v_columns) >= 4:
+            # Top V feature interactions
             important_v = v_columns[:6]  # Use top 6 V features
 
             for i in range(len(important_v)):
@@ -523,9 +568,7 @@ class AdvancedFeatureEngineering:
             poly_features = poly.fit_transform(df[v_columns[:3]])  # Use only first 3 V features
             poly_df = pd.DataFrame(
                 poly_features[:, len(v_columns[:3]) :],  # Exclude original features
-                columns=[
-                    f"poly_{i}" for i in range(poly_features.shape[1] - len(v_columns[:3]))
-                ],
+                columns=[f"poly_{i}" for i in range(poly_features.shape[1] - len(v_columns[:3]))],
                 index=df.index,
             )
             df = pd.concat([df, poly_df.iloc[:, :10]], axis=1)  # Add only first 10 poly features
@@ -537,6 +580,13 @@ class AdvancedFeatureEngineering:
     def handle_missing_values(self, df: pd.DataFrame, strategy: str = "smart") -> pd.DataFrame:
         """
         Advanced missing value handling with multiple strategies
+
+        Args:
+            df: Input dataframe
+            strategy: Imputation strategy ("smart", "median", "knn", "iterative")
+
+        Returns:
+            DataFrame with handled missing values
         """
         df = df.copy()
 
@@ -560,8 +610,10 @@ class AdvancedFeatureEngineering:
                     # Numerical imputation
                     if strategy == "smart":
                         if missing_ratio < 0.1:
+                            # Low missing: use median
                             df[column] = df[column].fillna(df[column].median())
                         elif missing_ratio < 0.3:
+                            # Moderate missing: use grouped median if possible
                             if "hour" in df.columns:
                                 df[column] = df.groupby("hour")[column].transform(
                                     lambda x: x.fillna(x.median())
@@ -569,6 +621,7 @@ class AdvancedFeatureEngineering:
                             else:
                                 df[column] = df[column].fillna(df[column].median())
                         else:
+                            # High missing: use zero or flag
                             df[column] = df[column].fillna(0)
                     else:
                         df[column] = df[column].fillna(df[column].median())
@@ -578,6 +631,13 @@ class AdvancedFeatureEngineering:
     def encode_categorical_features(self, df: pd.DataFrame, fit: bool = True) -> pd.DataFrame:
         """
         Enhanced categorical encoding with multiple strategies
+
+        Args:
+            df: Input dataframe
+            fit: Whether to fit encoders
+
+        Returns:
+            DataFrame with encoded features
         """
         df = df.copy()
         categorical_columns = df.select_dtypes(include=["object", "category"]).columns
@@ -601,9 +661,10 @@ class AdvancedFeatureEngineering:
                     if fit:
                         dummies = pd.get_dummies(df[column], prefix=column, drop_first=True)
                         df = pd.concat([df.drop(column, axis=1), dummies], axis=1)
-                        self.encoders[f"{column}_categories"] = dummies.columns.tolist()
+                        self.encoders[f"{column}_categories"] = df[column].unique()
                     else:
                         if f"{column}_categories" in self.encoders:
+                            known_categories = self.encoders[f"{column}_categories"]
                             dummies = pd.get_dummies(df[column], prefix=column, drop_first=True)
                             df = pd.concat([df.drop(column, axis=1), dummies], axis=1)
 
@@ -626,6 +687,13 @@ class AdvancedFeatureEngineering:
     def scale_features(self, df: pd.DataFrame, fit: bool = True) -> pd.DataFrame:
         """
         Advanced feature scaling with multiple methods
+
+        Args:
+            df: Input dataframe
+            fit: Whether to fit scalers
+
+        Returns:
+            DataFrame with scaled features
         """
         df = df.copy()
 
@@ -641,21 +709,15 @@ class AdvancedFeatureEngineering:
         if numerical_columns:
             if fit:
                 # Choose and fit scaler
-                method = self.config.scaling_method.lower()
-                if method == "standard":
+                if self.config.scaling_method == "standard":
                     scaler = StandardScaler()
-                elif method == "robust":
-                    scaler = RobustScaler()
-                elif method == "minmax":
-                    scaler = MinMaxScaler()
-                elif method == "quantile":
-                    scaler = QuantileTransformer(
-                        output_distribution="normal", random_state=42
-                    )
-                elif method == "power":
+                elif self.config.scaling_method == "power":
                     scaler = PowerTransformer(method="yeo-johnson", standardize=True)
-                else:
-                    # default to robust if unknown
+                elif self.config.scaling_method == "minmax":
+                    scaler = MinMaxScaler()
+                elif self.config.scaling_method == "quantile":
+                    scaler = QuantileTransformer(output_distribution="normal", random_state=42)
+                else:  # robust (default)
                     scaler = RobustScaler()
 
                 # Fit and transform
@@ -665,6 +727,7 @@ class AdvancedFeatureEngineering:
             else:
                 # Transform using existing scaler
                 if "main" in self.scalers and "columns" in self.scalers:
+                    # Only transform columns that exist in both datasets
                     cols_to_scale = [col for col in self.scalers["columns"] if col in df.columns]
                     if cols_to_scale:
                         df[cols_to_scale] = self.scalers["main"].transform(df[cols_to_scale])
@@ -676,6 +739,14 @@ class AdvancedFeatureEngineering:
     ) -> pd.DataFrame:
         """
         Advanced feature selection using multiple methods
+
+        Args:
+            df: Input dataframe
+            target: Target variable
+            method: Selection method
+
+        Returns:
+            DataFrame with selected features
         """
         method = method or self.config.feature_selection_method
 
@@ -713,11 +784,10 @@ class AdvancedFeatureEngineering:
         self.selected_features = X.columns[selector.get_support()].tolist()
 
         # Store feature importance scores
-        feature_scores = (
-            pd.DataFrame({"feature": X.columns, "score": selector.scores_})
-            .sort_values("score", ascending=False)
-            .reset_index(drop=True)
-        )
+        feature_scores = pd.DataFrame(
+            {"feature": X.columns, "score": selector.scores_}
+        ).sort_values("score", ascending=False)
+
         self.feature_importance["univariate"] = feature_scores
 
         # Create dataframe with selected features
@@ -732,6 +802,13 @@ class AdvancedFeatureEngineering:
     def apply_dimensionality_reduction(self, df: pd.DataFrame, fit: bool = True) -> pd.DataFrame:
         """
         Apply PCA or other dimensionality reduction techniques
+
+        Args:
+            df: Input dataframe
+            fit: Whether to fit the reducer
+
+        Returns:
+            DataFrame with reduced dimensions
         """
         if not self.config.enable_pca:
             return df
@@ -783,6 +860,13 @@ class AdvancedFeatureEngineering:
     def _detect_outliers_iqr(self, series: pd.Series, multiplier: float = 1.5) -> np.ndarray:
         """
         Detect outliers using IQR method
+
+        Args:
+            series: Pandas series
+            multiplier: IQR multiplier for outlier threshold
+
+        Returns:
+            Boolean array of outliers
         """
         Q1 = series.quantile(0.25)
         Q3 = series.quantile(0.75)
@@ -794,6 +878,12 @@ class AdvancedFeatureEngineering:
     def _mahalanobis_distance(self, X: pd.DataFrame) -> np.ndarray:
         """
         Calculate Mahalanobis distance for anomaly detection
+
+        Args:
+            X: Feature matrix
+
+        Returns:
+            Array of Mahalanobis distances
         """
         mean = X.mean()
         cov = X.cov()
@@ -807,6 +897,13 @@ class AdvancedFeatureEngineering:
     def _safe_transform_encoder(self, df: pd.DataFrame, column: str) -> pd.DataFrame:
         """
         Safely transform categorical column handling unknown categories
+
+        Args:
+            df: Input dataframe
+            column: Column to transform
+
+        Returns:
+            DataFrame with transformed column
         """
         encoder = self.encoders[column]
         known_categories = set(encoder.classes_)
@@ -826,6 +923,13 @@ class AdvancedFeatureEngineering:
     def fit_transform(self, df: pd.DataFrame, target_column: Optional[str] = None) -> pd.DataFrame:
         """
         Fit the complete feature engineering pipeline and transform data
+
+        Args:
+            df: Input dataframe
+            target_column: Target column name
+
+        Returns:
+            Transformed dataframe
         """
         start_time = datetime.now()
 
@@ -887,6 +991,12 @@ class AdvancedFeatureEngineering:
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Transform new data using fitted pipeline
+
+        Args:
+            df: Input dataframe
+
+        Returns:
+            Transformed dataframe
         """
         if not self.is_fitted:
             raise ValueError("Pipeline must be fitted before transforming new data!")
@@ -909,7 +1019,7 @@ class AdvancedFeatureEngineering:
 
         # Select same features
         if self.selected_features:
-            available_features = [f for f in self.selected_features if f in df.columns]
+            # NOTE: removed unused 'available_features' variable (flake8 F841)
             missing_features = [f for f in self.selected_features if f not in df.columns]
 
             if missing_features:
@@ -919,7 +1029,7 @@ class AdvancedFeatureEngineering:
 
             df = df[self.selected_features]
 
-            # Add target back if it exists (no-op in transform)
+            # Add target back if it exists
             if self.target_column in df.columns and self.target_column not in self.selected_features:
                 df[self.target_column] = df[self.target_column]
 
@@ -928,6 +1038,10 @@ class AdvancedFeatureEngineering:
     def _save_pipeline_metadata(self, df: pd.DataFrame, execution_time: float):
         """
         Save pipeline metadata for tracking and debugging
+
+        Args:
+            df: Transformed dataframe
+            execution_time: Pipeline execution time
         """
         if not self.config.save_feature_metadata:
             return
@@ -961,6 +1075,7 @@ class AdvancedFeatureEngineering:
             },
         }
 
+        # Save to file (in production, save to feature store or database)
         with open(
             f"feature_pipeline_metadata_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w"
         ) as f:
@@ -969,15 +1084,16 @@ class AdvancedFeatureEngineering:
     def get_feature_importance_report(self) -> Dict[str, Any]:
         """
         Generate comprehensive feature importance report
+
+        Returns:
+            Dictionary containing feature importance information
         """
         report = {
             "pipeline_version": self.pipeline_version,
             "is_fitted": self.is_fitted,
             "total_features": len(self.selected_features) if self.selected_features else 0,
             "selected_features": self.selected_features,
-            "feature_scores": self.feature_importance.get("univariate", pd.DataFrame()).to_dict(
-                "records"
-            )
+            "feature_scores": self.feature_importance.get("univariate", pd.DataFrame()).to_dict("records")
             if "univariate" in self.feature_importance
             else None,
             "scaling_method": self.config.scaling_method,
@@ -1063,11 +1179,5 @@ def validate_pipeline_performance():
 
 
 if __name__ == "__main__":
-    # Run validation when executed directly
-    try:
-        validate_pipeline_performance()
-    except Exception as e:
-        import traceback
-
-        print(f"❌ Validation failed: {e}")
-        traceback.print_exc()
+    # Run validation
+    validate_pipeline_performance()
