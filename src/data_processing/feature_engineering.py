@@ -1164,7 +1164,7 @@ def validate_pipeline_performance():
 
 if __name__ == "__main__":
     # Run validation
-    validate_pipeline_performance()method == "minmax":
+    if validate_pipeline_performance().method == "minmax":
                     scaler = MinMaxScaler()
                 elif self.config.scaling_method == "quantile":
                     scaler = QuantileTransformer(output_distribution="normal", random_state=42)
