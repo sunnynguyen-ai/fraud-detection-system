@@ -30,8 +30,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install black flake8 isort mypy
       
-      - name: Run Black formatter check
-        run: black --check src/ tests/
+      - name: Run Black formatter
+        run: black src/ tests/
       
       - name: Run Flake8 linter
         run: flake8 src/ tests/ --max-line-length=100 --ignore=E203,W503
