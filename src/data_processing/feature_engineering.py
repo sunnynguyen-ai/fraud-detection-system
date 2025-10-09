@@ -906,11 +906,10 @@ class AdvancedFeatureEngineering:
             DataFrame with transformed column
         """
         encoder = self.encoders[column]
-        known_categories = set(encoder.classes_)
 
         # Handle unknown categories
         df[column] = df[column].astype(str)
-        unknown_mask = ~df[column].isin(known_categories)
+        unknown_mask = ~df[column].isin(encoder.classes_)
 
         if unknown_mask.any():
             # Replace unknown with most frequent known category
@@ -919,6 +918,7 @@ class AdvancedFeatureEngineering:
 
         df[column] = encoder.transform(df[column])
         return df
+
 
     def fit_transform(self, df: pd.DataFrame, target_column: Optional[str] = None) -> pd.DataFrame:
         """
