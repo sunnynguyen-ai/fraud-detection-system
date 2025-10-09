@@ -25,7 +25,7 @@ import joblib
 import pandas as pd
 
 # FastAPI imports
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
@@ -57,89 +57,83 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global variables for loaded models
+# ---------------------------------------------------------------------
+# Global variables for models and performance metrics
+# ---------------------------------------------------------------------
 feature_pipeline = None
 ensemble_model = None
 model_loaded = False
-model_load_time = None
+model_load_time: Optional[str] = None
+
+request_count = 0
+total_processing_time = 0.0
+start_time = time.time()
 
 
+# ---------------------------------------------------------------------
+# Pydantic Models
+# ---------------------------------------------------------------------
 class TransactionRequest(BaseModel):
-    """
-    Pydantic model for transaction data validation
+    """Schema for validating a single transaction"""
 
-    This model ensures that incoming transaction data meets the required
-    format and constraints for fraud detection processing.
-    """
-
-    # Core transaction fields
     Time: float = Field(..., ge=0, description="Time in seconds from reference point")
     Amount: float = Field(..., ge=0, description="Transaction amount in USD")
 
-    # V1-V20 features (anonymized features from PCA transformation)
-    V1: float = Field(..., description="Anonymized feature V1")
-    V2: float = Field(..., description="Anonymized feature V2")
-    V3: float = Field(..., description="Anonymized feature V3")
-    V4: float = Field(..., description="Anonymized feature V4")
-    V5: float = Field(..., description="Anonymized feature V5")
-    V6: float = Field(..., description="Anonymized feature V6")
-    V7: float = Field(..., description="Anonymized feature V7")
-    V8: float = Field(..., description="Anonymized feature V8")
-    V9: float = Field(..., description="Anonymized feature V9")
-    V10: float = Field(..., description="Anonymized feature V10")
-    V11: float = Field(..., description="Anonymized feature V11")
-    V12: float = Field(..., description="Anonymized feature V12")
-    V13: float = Field(..., description="Anonymized feature V13")
-    V14: float = Field(..., description="Anonymized feature V14")
-    V15: float = Field(..., description="Anonymized feature V15")
-    V16: float = Field(..., description="Anonymized feature V16")
-    V17: float = Field(..., description="Anonymized feature V17")
-    V18: float = Field(..., description="Anonymized feature V18")
-    V19: float = Field(..., description="Anonymized feature V19")
-    V20: float = Field(..., description="Anonymized feature V20")
+    # PCA-anonymized features
+    V1: float
+    V2: float
+    V3: float
+    V4: float
+    V5: float
+    V6: float
+    V7: float
+    V8: float
+    V9: float
+    V10: float
+    V11: float
+    V12: float
+    V13: float
+    V14: float
+    V15: float
+    V16: float
+    V17: float
+    V18: float
+    V19: float
+    V20: float
 
-    # Optional metadata
-    transaction_id: Optional[str] = Field(
-        None, description="Unique transaction identifier"
-    )
+    transaction_id: Optional[str] = Field(None, description="Unique transaction ID")
 
     @validator("Amount")
-    def amount_must_be_positive(cls, v):
+    def validate_amount(cls, v):
         if v < 0:
             raise ValueError("Amount must be non-negative")
-        if v > 100000:  # Reasonable upper limit
-            logger.warning(f"Very large transaction amount: ${v:,.2f}")
+        if v > 100000:
+            logger.warning(f"Unusually large transaction: ${v:,.2f}")
         return v
 
     @validator("Time")
-    def time_must_be_valid(cls, v):
+    def validate_time(cls, v):
         if v < 0:
             raise ValueError("Time must be non-negative")
         return v
 
 
 class BatchTransactionRequest(BaseModel):
-    """Model for batch transaction processing"""
+    """Schema for validating a batch of transactions"""
 
     transactions: List[TransactionRequest] = Field(..., min_items=1, max_items=1000)
 
 
 class FraudPredictionResponse(BaseModel):
-    """
-    Response model for fraud prediction results
-    """
+    """Response model for a single fraud prediction"""
 
     transaction_id: Optional[str]
     fraud_probability: float = Field(..., ge=0, le=1)
     is_fraud: bool
     risk_level: str = Field(..., regex="^(LOW|MEDIUM|HIGH|CRITICAL)$")
     confidence_score: float = Field(..., ge=0, le=1)
-
-    # Model explanation
     explanation: Optional[Dict[str, Any]] = None
     top_risk_factors: Optional[List[Dict[str, Any]]] = None
-
-    # Metadata
     processing_time_ms: float
     model_version: str
     timestamp: str
@@ -154,7 +148,7 @@ class BatchPredictionResponse(BaseModel):
 
 
 class HealthCheckResponse(BaseModel):
-    """Health check response model"""
+    """Health check response"""
 
     status: str
     timestamp: str
@@ -164,137 +158,97 @@ class HealthCheckResponse(BaseModel):
     version: str
 
 
-# Global performance tracking
-request_count = 0
-total_processing_time = 0
-start_time = time.time()
-
-
-def load_models():
-    """
-    Load the trained models and preprocessing pipeline
-
-    This function loads the feature engineering pipeline and ensemble model
-    that were trained and saved during the model development phase.
-    """
+# ---------------------------------------------------------------------
+# Utility functions
+# ---------------------------------------------------------------------
+def load_models() -> bool:
+    """Load trained models and preprocessing pipelines"""
     global feature_pipeline, ensemble_model, model_loaded, model_load_time
-
     try:
         logger.info("Loading fraud detection models...")
 
-        # Define model paths
         models_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models"
         )
         fe_path = os.path.join(models_dir, "feature_engineering_pipeline.pkl")
         ensemble_path = os.path.join(models_dir, "fraud_detection_ensemble.pkl")
 
-        # Check if model files exist
         if not os.path.exists(fe_path):
-            logger.error(f"Feature engineering pipeline not found at {fe_path}")
+            logger.error(f"Missing feature pipeline at {fe_path}")
             return False
-
         if not os.path.exists(ensemble_path):
-            logger.error(f"Ensemble model not found at {ensemble_path}")
+            logger.error(f"Missing ensemble model at {ensemble_path}")
             return False
 
-        # Load feature engineering pipeline
         feature_pipeline = joblib.load(fe_path)
-        logger.info("✅ Feature engineering pipeline loaded")
-
-        # Load ensemble model
         ensemble_model = joblib.load(ensemble_path)
-        logger.info("✅ Ensemble model loaded")
 
         model_loaded = True
         model_load_time = datetime.now().isoformat()
-        logger.info("🎯 All models loaded successfully!")
-
+        logger.info("✅ Models loaded successfully")
         return True
-
     except Exception as e:
-        logger.error(f"❌ Error loading models: {str(e)}")
+        logger.exception(f"❌ Error loading models: {e}")
+        model_loaded = False
         return False
 
 
 def preprocess_transaction(transaction: TransactionRequest) -> pd.DataFrame:
-    """
-    Preprocess a single transaction for model inference
-
-    Args:
-        transaction: Transaction data
-
-    Returns:
-        Preprocessed features as DataFrame
-    """
+    """Convert a TransactionRequest into a preprocessed DataFrame"""
     try:
-        # Convert to DataFrame
-        transaction_dict = transaction.dict()
-        # Remove non-feature fields
-        transaction_dict.pop("transaction_id", None)
+        df = pd.DataFrame([transaction.dict(exclude_none=True)])
+        df.drop(columns=["transaction_id"], inplace=True, errors="ignore")
 
-        df = pd.DataFrame([transaction_dict])
-
-        # Apply feature engineering pipeline
-        if feature_pipeline and feature_pipeline.is_fitted:
-            df_processed = feature_pipeline.transform(df)
-        else:
-            # Fallback: use raw features if pipeline not available
-            logger.warning("Feature pipeline not available, using raw features")
-            df_processed = df
-
-        return df_processed
-
+        if feature_pipeline is not None and hasattr(feature_pipeline, "transform"):
+            return feature_pipeline.transform(df)
+        logger.warning("Feature pipeline unavailable, using raw features.")
+        return df
     except Exception as e:
-        logger.error(f"Error preprocessing transaction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Preprocessing error: {str(e)}")
+        logger.error(f"Preprocessing error: {e}")
+        raise HTTPException(status_code=500, detail=f"Preprocessing error: {e}")
 
 
 def get_risk_level(probability: float) -> str:
-    """Determine risk level based on fraud probability"""
     if probability >= 0.9:
         return "CRITICAL"
-    elif probability >= 0.7:
+    if probability >= 0.7:
         return "HIGH"
-    elif probability >= 0.3:
+    if probability >= 0.3:
         return "MEDIUM"
-    else:
-        return "LOW"
+    return "LOW"
 
 
 def get_confidence_score(probability: float) -> float:
-    """Calculate confidence score based on distance from decision boundary"""
-    # Confidence is higher when probability is closer to 0 or 1
-    return abs(probability - 0.5) * 2
+    """Confidence increases as probability approaches 0 or 1"""
+    return round(abs(probability - 0.5) * 2, 4)
 
 
 async def check_model_dependency():
-    """Dependency to ensure models are loaded"""
     if not model_loaded:
         raise HTTPException(
             status_code=503,
-            detail="Models not loaded. Please check server logs and restart if necessary.",
+            detail="Models not loaded. Please reload or restart the server.",
         )
 
 
+# ---------------------------------------------------------------------
+# FastAPI event hooks
+# ---------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
-    """Load models when the application starts"""
     logger.info("🚀 Starting Fraud Detection API...")
-    success = load_models()
-    if not success:
-        logger.error("❌ Failed to load models during startup")
-    else:
-        logger.info("✅ API startup completed successfully")
+    if not load_models():
+        logger.warning("Models failed to load during startup.")
 
 
+# ---------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------
 @app.get("/", response_model=Dict[str, str])
 async def root():
-    """Root endpoint with API information"""
     return {
         "message": "Fraud Detection API",
         "version": "1.0.0",
-        "status": "active",
         "docs": "/docs",
         "health": "/health",
     }
@@ -302,7 +256,6 @@ async def root():
 
 @app.get("/health", response_model=HealthCheckResponse)
 async def health_check():
-    """Health check endpoint"""
     return HealthCheckResponse(
         status="healthy" if model_loaded else "unhealthy",
         timestamp=datetime.now().isoformat(),
@@ -319,173 +272,99 @@ async def predict_fraud(
     background_tasks: BackgroundTasks,
     _: None = Depends(check_model_dependency),
 ):
-    """
-    Predict fraud probability for a single transaction
-
-    This endpoint processes a transaction and returns:
-    - Fraud probability (0-1)
-    - Binary fraud classification
-    - Risk level assessment
-    - Model explanation (if available)
-    - Processing metadata
-    """
     global request_count, total_processing_time
-
-    start_time_ms = time.time() * 1000
-
+    start_ms = time.time() * 1000
     try:
-        # Preprocess transaction
-        df_processed = preprocess_transaction(transaction)
+        df = preprocess_transaction(transaction)
+        fraud_prob = ensemble_model.predict_proba(df)[0, 1]
+        risk_level = get_risk_level(fraud_prob)
+        confidence = get_confidence_score(fraud_prob)
+        processing_time = time.time() * 1000 - start_ms
 
-        # Get ensemble prediction
-        fraud_probability = ensemble_model.predict_proba(df_processed)[0, 1]
-        is_fraud = fraud_probability > 0.5
-
-        # Calculate metrics
-        risk_level = get_risk_level(fraud_probability)
-        confidence_score = get_confidence_score(fraud_probability)
-
-        # Get explanation (if available)
-        explanation = None
-        top_risk_factors = None
-
-        try:
-            if hasattr(ensemble_model, "explain_prediction"):
-                explanation_result = ensemble_model.explain_prediction(df_processed, 0)
-                if "top_features" in explanation_result:
-                    top_risk_factors = explanation_result["top_features"][:3]
-                explanation = {
-                    "method": "SHAP",
-                    "available": True,
-                    "top_features_count": len(
-                        explanation_result.get("top_features", [])
-                    ),
-                }
-        except Exception as e:
-            logger.warning(f"Could not generate explanation: {str(e)}")
-            explanation = {"method": "SHAP", "available": False, "error": str(e)}
-
-        # Calculate processing time
-        processing_time_ms = time.time() * 1000 - start_time_ms
-
-        # Update global metrics
         request_count += 1
-        total_processing_time += processing_time_ms
-
-        # Log prediction
-        logger.info(
-            f"Prediction - ID: {transaction.transaction_id}, "
-            f"Probability: {fraud_probability:.4f}, "
-            f"Risk: {risk_level}, "
-            f"Time: {processing_time_ms:.2f}ms"
-        )
+        total_processing_time += processing_time
 
         return FraudPredictionResponse(
             transaction_id=transaction.transaction_id,
-            fraud_probability=round(fraud_probability, 4),
-            is_fraud=is_fraud,
+            fraud_probability=round(fraud_prob, 4),
+            is_fraud=fraud_prob > 0.5,
             risk_level=risk_level,
-            confidence_score=round(confidence_score, 4),
-            explanation=explanation,
-            top_risk_factors=top_risk_factors,
-            processing_time_ms=round(processing_time_ms, 2),
+            confidence_score=confidence,
+            explanation=None,
+            top_risk_factors=None,
+            processing_time_ms=round(processing_time, 2),
             model_version="ensemble-v1.0",
             timestamp=datetime.now().isoformat(),
         )
-
     except Exception as e:
-        logger.error(f"Error during prediction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+        logger.exception(f"Prediction error: {e}")
+        raise HTTPException(status_code=500, detail=f"Prediction error: {e}")
 
 
 @app.post("/predict/batch", response_model=BatchPredictionResponse)
-async def predict_fraud_batch(
+async def predict_batch(
     batch_request: BatchTransactionRequest,
     _: None = Depends(check_model_dependency),
 ):
-    """
-    Predict fraud probability for multiple transactions
-
-    Processes up to 1000 transactions in a single request for efficient
-    batch processing.
-    """
-    start_time_ms = time.time() * 1000
-
+    start_ms = time.time() * 1000
+    preds, frauds, highs = [], 0, 0
     try:
-        predictions = []
-        fraud_count = 0
-        high_risk_count = 0
-
-        for transaction in batch_request.transactions:
-            # Process each transaction
-            df_processed = preprocess_transaction(transaction)
-            fraud_probability = ensemble_model.predict_proba(df_processed)[0, 1]
-            is_fraud = fraud_probability > 0.5
-            risk_level = get_risk_level(fraud_probability)
-
-            if is_fraud:
-                fraud_count += 1
-            if risk_level in ["HIGH", "CRITICAL"]:
-                high_risk_count += 1
-
-            predictions.append(
+        for tx in batch_request.transactions:
+            df = preprocess_transaction(tx)
+            prob = ensemble_model.predict_proba(df)[0, 1]
+            risk = get_risk_level(prob)
+            if prob > 0.5:
+                frauds += 1
+            if risk in ["HIGH", "CRITICAL"]:
+                highs += 1
+            preds.append(
                 FraudPredictionResponse(
-                    transaction_id=transaction.transaction_id,
-                    fraud_probability=round(fraud_probability, 4),
-                    is_fraud=is_fraud,
-                    risk_level=risk_level,
-                    confidence_score=round(get_confidence_score(fraud_probability), 4),
-                    processing_time_ms=0,  # Will be updated with batch time
+                    transaction_id=tx.transaction_id,
+                    fraud_probability=round(prob, 4),
+                    is_fraud=prob > 0.5,
+                    risk_level=risk,
+                    confidence_score=get_confidence_score(prob),
+                    processing_time_ms=0.0,
                     model_version="ensemble-v1.0",
                     timestamp=datetime.now().isoformat(),
                 )
             )
 
-        total_processing_time_ms = time.time() * 1000 - start_time_ms
-        avg_processing_time = total_processing_time_ms / len(predictions)
+        total_ms = time.time() * 1000 - start_ms
+        avg_ms = total_ms / len(preds)
+        for p in preds:
+            p.processing_time_ms = round(avg_ms, 2)
 
-        # Update individual processing times
-        for pred in predictions:
-            pred.processing_time_ms = round(avg_processing_time, 2)
-
-        batch_summary = {
-            "total_transactions": len(predictions),
-            "fraud_detected": fraud_count,
-            "high_risk_transactions": high_risk_count,
-            "fraud_rate": round(fraud_count / len(predictions), 4),
-            "average_processing_time_ms": round(avg_processing_time, 2),
+        summary = {
+            "total_transactions": len(preds),
+            "fraud_detected": frauds,
+            "high_risk_transactions": highs,
+            "fraud_rate": round(frauds / len(preds), 4),
+            "avg_processing_time_ms": round(avg_ms, 2),
         }
 
-        logger.info(
-            f"Batch prediction - {len(predictions)} transactions, "
-            f"{fraud_count} fraud detected"
-        )
-
         return BatchPredictionResponse(
-            predictions=predictions,
-            batch_summary=batch_summary,
-            total_processing_time_ms=round(total_processing_time_ms, 2),
+            predictions=preds,
+            batch_summary=summary,
+            total_processing_time_ms=round(total_ms, 2),
         )
-
     except Exception as e:
-        logger.error(f"Error during batch prediction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Batch prediction error: {str(e)}")
+        logger.exception(f"Batch prediction error: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch prediction error: {e}")
 
 
 @app.get("/metrics")
-async def get_metrics():
-    """Get API performance metrics"""
+async def metrics():
     uptime = time.time() - start_time
-    avg_processing_time = (
-        total_processing_time / request_count if request_count > 0 else 0
-    )
-
+    avg_time = total_processing_time / request_count if request_count else 0
     return {
         "requests_processed": request_count,
-        "average_processing_time_ms": round(avg_processing_time, 2),
+        "average_processing_time_ms": round(avg_time, 2),
         "total_processing_time_ms": round(total_processing_time, 2),
         "uptime_seconds": round(uptime, 2),
-        "requests_per_second": round(request_count / uptime, 2) if uptime > 0 else 0,
+        "requests_per_second": round(request_count / uptime, 2)
+        if uptime
+        else 0,
         "model_loaded": model_loaded,
         "timestamp": datetime.now().isoformat(),
     }
@@ -493,23 +372,19 @@ async def get_metrics():
 
 @app.post("/reload-models")
 async def reload_models():
-    """Reload models without restarting the API"""
-    try:
-        success = load_models()
-        if success:
-            return {
-                "message": "Models reloaded successfully",
-                "timestamp": datetime.now().isoformat(),
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to reload models")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reloading models: {str(e)}")
+    if load_models():
+        return {
+            "message": "Models reloaded successfully",
+            "timestamp": datetime.now().isoformat(),
+        }
+    raise HTTPException(status_code=500, detail="Failed to reload models")
 
 
+# ---------------------------------------------------------------------
 # Error handlers
+# ---------------------------------------------------------------------
 @app.exception_handler(404)
-async def not_found_handler(request, exc):
+async def not_found_handler(request: Request, exc):
     return JSONResponse(
         status_code=404,
         content={
@@ -520,8 +395,8 @@ async def not_found_handler(request, exc):
 
 
 @app.exception_handler(500)
-async def internal_error_handler(request, exc):
-    logger.error(f"Internal server error: {str(exc)}")
+async def internal_error_handler(request: Request, exc):
+    logger.error(f"Internal server error: {exc}")
     return JSONResponse(
         status_code=500,
         content={
@@ -534,8 +409,11 @@ async def internal_error_handler(request, exc):
 if __name__ == "__main__":
     import uvicorn
 
-    # Run the API
     logger.info("🚀 Starting Fraud Detection API server...")
     uvicorn.run(
-        "fraud_api:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+        "fraud_api:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info",
     )
